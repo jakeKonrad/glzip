@@ -1,5 +1,5 @@
-// glzip is a graph compression library for graph learning systems.
-// Copyright (C) 2022  Jacob Konrad
+// glzip is a graph compression library for graph learning systems
+// Copyright (C) 2022 Jacob Konrad
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Affero General Public License as published
@@ -179,7 +179,8 @@ impl<I: Iterator<Item = u32>> Iterator for Diffs<I>
 }
 
 pub fn encode<I>(bytes: &mut Vec<u8>, source: u32, into_edges: I)
-where I: IntoIterator<Item = u32>
+where
+    I: IntoIterator<Item = u32>,
 {
     let mut edges = into_edges.into_iter().peekable();
 

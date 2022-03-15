@@ -14,25 +14,46 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#![feature(slice_group_by)]
-#![feature(portable_simd)]
+use std::{error::Error, path::Path};
 
-pub mod csr;
-mod decoder;
-mod encoder;
-#[cfg(any(feature = "csv", feature = "npy"))]
-pub mod io;
-mod iter;
-mod vec;
+use crate::Edge;
 
-pub type Edge = [u32; 2];
+#[cfg(feature = "csv")]
+mod csv;
 
-pub const BYTES_PER_EDGE: usize = std::mem::size_of::<Edge>();
+type BoxedError = Box<dyn Error + Send + Sync>;
 
-const KIBIBYTE: usize = 1024;
+fn raise<S: AsRef<str>>(payload: S) -> BoxedError
+{
+    Box::from(payload.as_ref())
+}
 
-const MEBIBYTE: usize = 1024 * KIBIBYTE;
+enum Iter
+{
+    #[cfg(feature = "csv")]
+    Csv(csv::Iter),
+}
 
-const GIBIBYTE: usize = 1024 * MEBIBYTE;
+impl Iterator for Iter
+{
+    type Item = Result<Edge, BoxedError>;
 
-pub(in crate) const DEFAULT_EDGES_PER_CHUNK: usize = GIBIBYTE / BYTES_PER_EDGE;
+    fn next(&mut self) -> Option<Self::Item>
+    {
+        match self {
+            Iter::Csv(iter) => iter.next(),
+        }
+    }
+}
+
+pub fn load<P: AsRef<Path>>(
+    path: P,
+) -> Result<impl Iterator<Item = Result<Edge, BoxedError>>, BoxedError>
+{
+    if cfg!(feature = "csv") {
+        csv::load(path).map(|csv| Iter::Csv(csv))
+    }
+    else {
+        unreachable!()
+    }
+}

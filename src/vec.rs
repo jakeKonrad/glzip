@@ -14,25 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#![feature(slice_group_by)]
-#![feature(portable_simd)]
-
-pub mod csr;
-mod decoder;
-mod encoder;
-#[cfg(any(feature = "csv", feature = "npy"))]
-pub mod io;
-mod iter;
-mod vec;
-
-pub type Edge = [u32; 2];
-
-pub const BYTES_PER_EDGE: usize = std::mem::size_of::<Edge>();
-
-const KIBIBYTE: usize = 1024;
-
-const MEBIBYTE: usize = 1024 * KIBIBYTE;
-
-const GIBIBYTE: usize = 1024 * MEBIBYTE;
-
-pub(in crate) const DEFAULT_EDGES_PER_CHUNK: usize = GIBIBYTE / BYTES_PER_EDGE;
+pub fn concat<T>(mut xs: Vec<T>, ys: Vec<T>) -> Vec<T>
+{
+    if xs.len() == 0 {
+        ys
+    }
+    else if ys.len() == 0 {
+        xs
+    }
+    else {
+        xs.extend(ys.into_iter());
+        xs
+    }
+}

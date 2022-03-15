@@ -1,0 +1,13 @@
+brace_style = "AlwaysNextLine"
+
+control_brace_style = "ClosingNextLine"
+
+imports_granularity = "Crate"
+
+overflow_delimited_expr = true
+
+reorder_impl_items = true
+
+group_imports = "StdExternalCrate"
+
+unstable_features = true
