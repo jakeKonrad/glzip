@@ -78,7 +78,7 @@ fn find_index_edgelist(xs: &[Edge]) -> Option<usize>
             .windows(2)
             .enumerate()
             .find_map(|(i, win)| {
-                if win[0][0] == win[1][0] {
+                if win[0].0 == win[1].0 {
                     None
                 }
                 else {
@@ -113,13 +113,13 @@ fn rec_edgelist_to_csr(
     match split_edgelist(edgelist) {
         (xs, None) => {
             let mut iter = xs.iter().dedup();
-            if let Some(&[u, v]) = iter.next() {
+            if let Some(&Edge(u, v)) = iter.next() {
                 let mut edges = Vec::with_capacity(xs.len());
                 let mut num_edges = 1usize;
                 encoder::encode(
                     &mut edges,
                     u,
-                    std::iter::once(v).chain(iter.map(|[_, w]| {
+                    std::iter::once(v).chain(iter.map(|Edge(_, w)| {
                         num_edges += 1;
                         *w
                     })),
@@ -164,3 +164,4 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
 
     (indptr, global_num_edges.into_inner(), edges)
 }
+
