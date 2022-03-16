@@ -56,10 +56,10 @@ impl CSR
     /// # Examples
     ///
     /// ```
-    /// use glzip_core::csr::CSR;
+    /// use glzip::CSR;
     ///
     /// let csr = CSR::from(vec![
-    ///     [0,1],
+    ///     [0u32,1],
     ///     [0,2],
     ///     [1,0],
     ///     [2,1],
@@ -190,10 +190,11 @@ impl CSR
     }
 }
 
-impl From<Vec<Edge>> for CSR
+impl<T: Into<Edge>> From<Vec<T>> for CSR
 {
-    fn from(mut edges: Vec<Edge>) -> Self
+    fn from(vect: Vec<T>) -> Self
     {
+        let mut edges: Vec<Edge> = vect.into_iter().map(|x| x.into()).collect();
         Self::from_buffer(&mut edges[..])
     }
 }
