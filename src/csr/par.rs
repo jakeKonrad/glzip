@@ -20,6 +20,7 @@ use std::{
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
+use crossbeam_utils::CachePadded;
 use rayon::prelude::*;
 
 use crate::{encoder, iter::*, vec, Edge, CSR};
@@ -30,26 +31,20 @@ where
 {
     rayon::iter::once(T::default())
         .chain(vect.into_par_iter())
-        .fold(
-            Vec::new,
-            |mut acc, x| {
-                match acc.last() {
-                    Some(&sum) => acc.push(sum + x),
-                    None => acc.push(x),
-                };
-                acc
-            },
-        )
-        .reduce(
-            Vec::new,
-            |mut left, right| match left.last() {
-                Some(&sum) => {
-                    left.extend(right.into_iter().map(|x| x + sum));
-                    left
-                }
-                None => right,
-            },
-        )
+        .fold(Vec::new, |mut acc, x| {
+            match acc.last() {
+                Some(&sum) => acc.push(sum + x),
+                None => acc.push(x),
+            };
+            acc
+        })
+        .reduce(Vec::new, |mut left, right| match left.last() {
+            Some(&sum) => {
+                left.extend(right.into_iter().map(|x| x + sum));
+                left
+            }
+            None => right,
+        })
 }
 
 fn find_index_edgelist(xs: &[Edge]) -> Option<usize>
@@ -166,29 +161,33 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
     (indptr, global_num_edges.into_inner(), edges)
 }
 
-fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[AtomicU64])
+fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[CachePadded<AtomicU64>])
 {
     if let Some(&k) = sizes.next() {
         for u in graph.adj(v) {
-            let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
-            let x = &p[u as usize];
-            let mut prev_prob = x.load(Ordering::Relaxed);
-            loop {
-                let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
-                match x.compare_exchange_weak(
-                    prev_prob,
-                    new_prob,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(prev) => prev_prob = prev,
-                }
-            }
-            calc_prop(u, sizes.clone(), graph, p);
+            rayon::join(
+                || calc_prop(u, sizes.clone(), graph, p),
+                || {
+                    let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
+                    let x = &p[u as usize];
+                    let mut prev_prob = x.load(Ordering::Relaxed);
+                    loop {
+                        let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
+                        match x.compare_exchange_weak(
+                            prev_prob,
+                            new_prob,
+                            Ordering::SeqCst,
+                            Ordering::Relaxed,
+                        ) {
+                            Ok(_) => break,
+                            Err(prev) => prev_prob = prev,
+                        }
+                    }
+            });
         }
     }
 }
+
 
 pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
 {
@@ -196,24 +195,22 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
 
     for &b in train_idx {
         if b {
-            p.push(AtomicU64::new(1f64.to_bits()));
+            p.push(CachePadded::new(AtomicU64::new(1f64.to_bits())));
         }
         else {
-            p.push(AtomicU64::new(0f64.to_bits()));
+            p.push(CachePadded::new(AtomicU64::new(0f64.to_bits())));
         }
     }
 
     let sizes = sizes.iter();
 
-    (0..train_idx.len())
-        .into_par_iter()
-        .for_each(|v| {
-            if train_idx[v] {
-                calc_prop(v as u32, sizes.clone(), graph, &p[..]);
-            }
-        });
+    (0..train_idx.len()).into_par_iter().for_each(|v| {
+        if train_idx[v] {
+            calc_prop(v as u32, sizes.clone(), graph, &p[..]);
+        }
+    });
 
     p.into_iter()
-        .map(|shared_float| f64::from_bits(shared_float.into_inner()))
+        .map(|shared_float| f64::from_bits(shared_float.into_inner().into_inner()))
         .collect()
 }
