@@ -16,6 +16,11 @@
 
 use std::{cmp::Ordering, mem};
 
+use rand::{
+    distributions::{Distribution, Uniform},
+    Rng,
+};
+
 pub struct Dedup<I: Iterator>
 {
     prev: Option<<I as Iterator>::Item>,
@@ -149,5 +154,78 @@ where
             xs: self,
             ys: other,
         }
+    }
+}
+
+/// https://en.m.wikipedia.org/wiki/Reservoir_sampling#An_optimal_algorithm
+pub trait IteratorReservoirSamplingExt: Iterator + Sized
+{
+    fn reservoir_sample<R: Rng + ?Sized>(self, rng: &mut R, k: usize) -> Vec<Self::Item>;
+}
+
+impl<I> IteratorReservoirSamplingExt for I
+where
+    I: Iterator + Sized,
+{
+    fn reservoir_sample<R: Rng + ?Sized>(mut self, rng: &mut R, k: usize) -> Vec<Self::Item>
+    {
+        let mut buf = Vec::with_capacity(k);
+
+        for _ in 0..k {
+            match self.next() {
+                Some(x) => buf.push(x),
+                None => return buf,
+            }
+        }
+
+        let indexing_range = Uniform::new(0, k);
+
+        let open_unit_interval = Uniform::new(f64::MIN_POSITIVE, 1.0);
+
+        let k = k as f64;
+
+        let mut w = (open_unit_interval.sample(rng).ln() / k).exp();
+
+        loop {
+            let i = (open_unit_interval.sample(rng).ln() / (1.0 - w).ln()).floor() as usize + 1;
+            match self.nth(i) {
+                Some(x) => {
+                    buf[indexing_range.sample(rng)] = x;
+                    w *= (open_unit_interval.sample(rng).ln() / k).exp()
+                }
+                None => break,
+            }
+        }
+
+        buf
+    }
+}
+
+pub struct Flip<T, I: Iterator<Item = (T, T)> + Sized>(I);
+
+impl<T, I> Iterator for Flip<T, I>
+where
+    I: Iterator<Item = (T, T)>,
+{
+    type Item = (T, T);
+
+    fn next(&mut self) -> Option<Self::Item>
+    {
+        self.0.next().map(|a| (a.1, a.0))
+    }
+}
+
+pub trait IteratorFlipExt<T>: Iterator<Item = (T, T)> + Sized
+{
+    fn flip(self) -> Flip<T, Self>;
+}
+
+impl<T, I> IteratorFlipExt<T> for I
+where
+    I: Iterator<Item = (T, T)>,
+{
+    fn flip(self) -> Flip<T, Self>
+    {
+        Flip(self)
     }
 }

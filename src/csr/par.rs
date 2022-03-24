@@ -16,12 +16,13 @@
 
 use std::{
     ops::Add,
-    sync::atomic::{AtomicUsize, Ordering},
+    slice,
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use rayon::prelude::*;
 
-use crate::{encoder, iter::*, vec, Edge};
+use crate::{encoder, iter::*, vec, Edge, CSR};
 
 fn prefix_sum<T>(vect: Vec<T>) -> Vec<T>
 where
@@ -30,7 +31,7 @@ where
     rayon::iter::once(T::default())
         .chain(vect.into_par_iter())
         .fold(
-            || vec![],
+            Vec::new,
             |mut acc, x| {
                 match acc.last() {
                     Some(&sum) => acc.push(sum + x),
@@ -40,7 +41,7 @@ where
             },
         )
         .reduce(
-            || vec![],
+            Vec::new,
             |mut left, right| match left.last() {
                 Some(&sum) => {
                     left.extend(right.into_iter().map(|x| x + sum));
@@ -94,7 +95,7 @@ fn find_index_edgelist(xs: &[Edge]) -> Option<usize>
     None
 }
 
-fn split_edgelist<'a>(xs: &'a [Edge]) -> (&'a [Edge], Option<&'a [Edge]>)
+fn split_edgelist(xs: &[Edge]) -> (&[Edge], Option<&[Edge]>)
 {
     match find_index_edgelist(xs) {
         Some(i) => {
@@ -165,3 +166,51 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
     (indptr, global_num_edges.into_inner(), edges)
 }
 
+fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[AtomicU64])
+{
+    if let Some(&k) = sizes.next() {
+        for u in graph.adj(v) {
+            let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
+            let x = &p[u as usize];
+            let mut prev_prob = x.load(Ordering::Relaxed);
+            loop {
+                let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
+                match x.compare_exchange_weak(
+                    prev_prob,
+                    new_prob,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(prev) => prev_prob = prev,
+                }
+            }
+            calc_prop(u, sizes.clone(), graph, p);
+        }
+    }
+}
+
+pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
+{
+    assert!(graph.order() == train_idx.len());
+    let mut p = Vec::with_capacity(train_idx.len());
+
+    for &b in train_idx {
+        if b {
+            p.push(AtomicU64::new(1f64.to_bits()));
+        }
+        else {
+            p.push(AtomicU64::new(0f64.to_bits()));
+        }
+    }
+
+    let sizes = sizes.iter();
+
+    (0u32..graph.order() as u32)
+        .into_par_iter()
+        .for_each(|v| calc_prop(v, sizes.clone(), graph, &p[..]));
+
+    p.into_iter()
+        .map(|shared_float| f64::from_bits(shared_float.into_inner()))
+        .collect()
+}

@@ -15,14 +15,17 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #![feature(portable_simd)]
+#![feature(unwrap_infallible)]
+#![feature(total_cmp)]
+#![feature(never_type)]
 
-mod csr;
+pub mod csr;
 mod decoder;
 mod edge;
 mod encoder;
+pub mod error;
 mod iter;
 mod vec;
 
-pub use csr::{CSR, Adj};
+pub use csr::CSR;
 pub use edge::Edge;
-

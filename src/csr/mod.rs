@@ -18,11 +18,14 @@
 //! edges are compressed using the byte run length encoding scheme from
 //! [Ligra+](https://people.csail.mit.edu/jshun/ligra+.pdf).
 
-use std::{convert::TryInto, num::TryFromIntError};
+use std::convert::TryInto;
 
-use sum::Sum3;
-
-use crate::{decoder, Edge};
+use crate::{
+    decoder,
+    error::{Error, Void},
+    iter::IteratorFlipExt,
+    Edge,
+};
 
 mod par;
 
@@ -73,10 +76,31 @@ impl CSR
     {
         let i = source as usize;
         Adj(self.vertices.get(i).and_then(move |&start| {
-            self.vertices.get(i + 1).map(|&end| {
-                decoder::decode(source, &self.edges[start..end])
-            })
+            self.vertices
+                .get(i + 1)
+                .map(|&end| decoder::decode(source, &self.edges[start..end]))
         }))
+    }
+
+    pub fn degree(&self, source: u32) -> usize
+    {
+        let i = source as usize;
+        self.vertices
+            .get(i)
+            .and_then(move |&start| {
+                self.vertices
+                    .get(i + 1)
+                    .map(|&end| decoder::count(source, &self.edges[start..end]))
+            })
+            .unwrap_or(0usize)
+    }
+
+    pub fn edges(&self) -> impl Iterator<Item = Edge> + '_
+    {
+        (0u32..self.order() as u32).flat_map(|u| {
+            let u = u as u32;
+            self.adj(u).map(move |v| Edge(u, v))
+        })
     }
 
     fn from_buffer(buf: &mut [Edge]) -> Self
@@ -104,59 +128,102 @@ impl CSR
         self.vertices.len().saturating_sub(1)
     }
 
+    pub fn optimize(
+        &self,
+        train_idx: &[bool],
+        sizes: &[usize],
+    ) -> (Self, Vec<u32>)
+    {
+        assert!(self.order() == train_idx.len());
+
+        let probs = par::probability_calculation(&self.reverse(), train_idx, sizes);
+
+        let mut vs: Vec<u32> = (0u32..self.order() as u32).collect();
+
+        // sort by descending probability
+        vs.sort_unstable_by(|&a, &b| probs[b as usize].total_cmp(&probs[a as usize]));
+
+        (self.reorder(&vs[..]), vs)
+    }
+
+    fn reverse(&self) -> Self
+    {
+        let iter = self.edges().map(|e| e.into()).flip().map(|t| Ok(t.into()));
+
+        let graph: Result<Self, !> = Self::try_from_edges_with_capacity(self.size(), iter);
+
+        graph.into_ok()
+    }
+
+    fn reorder(&self, perm: &[u32]) -> Self
+    {
+        let iter = self
+            .edges()
+            .map(|e| Ok(Edge(perm[e.0 as usize], perm[e.1 as usize])));
+
+        let graph: Result<Self, !> = Self::try_from_edges_with_capacity(self.size(), iter);
+
+        graph.into_ok()
+    }
+
     /// The number of edges in the graph.
     pub fn size(&self) -> usize
     {
         self.num_edges
     }
 
-    pub fn try_from_csr<Ix, T>(indptr: &[Ix], indices: &[T]) -> Result<Self, Sum3<<Ix as TryInto<usize>>::Error, <T as TryInto<u32>>::Error, TryFromIntError>>
+    pub fn try_from_csr<Ix, T>(indptr: &[Ix], indices: &[T]) -> Result<Self, Error<Ix, T>>
     where
         Ix: TryInto<usize> + Copy,
         T: TryInto<u32> + Copy,
     {
         let mut buf = Vec::with_capacity(indices.len());
-        for i in 0..indptr.len().saturating_sub(1) {
-            let u: u32 = match i.try_into() {
-                Ok(x) => x,
-                Err(e) => return Err(Sum3::C(e)),
-            };
-
-            let start = match indptr[i].try_into() {
-                Ok(x) => x,
-                Err(e) => return Err(Sum3::A(e)),
-            };
-            
-            let end = match indptr[i + 1].try_into() {
-                Ok(x) => x,
-                Err(e) => return Err(Sum3::A(e)),
-            };
-
-            for edge in indices[start..end].iter().map(|&v| v.try_into()) {
-                match edge {
-                    Ok(v) => buf.push(Edge(u, v)),
-                    Err(e) => return Err(Sum3::B(e)),
+        let range = indptr.len().saturating_sub(1);
+        if range <= u32::MAX as usize {
+            for i in 0..range {
+                let start = match indptr[i].try_into() {
+                    Ok(x) => x,
+                    Err(e) => return Err(Error::TryIntoUsize(e)),
                 };
+
+                let end = match indptr[i + 1].try_into() {
+                    Ok(x) => x,
+                    Err(e) => return Err(Error::TryIntoUsize(e)),
+                };
+
+                for edge in indices[start..end].iter().map(|&v| v.try_into()) {
+                    match edge {
+                        Ok(v) => buf.push(Edge(i as u32, v)),
+                        Err(e) => return Err(Error::TryIntoU32(e)),
+                    };
+                }
             }
+            Ok(Self::from_buffer(&mut buf[..]))
         }
-        Ok(Self::from_buffer(&mut buf[..]))
+        else {
+            Err(Error::TooManyVertices)
+        }
     }
 
-    pub fn try_from_edge_index<T>(src: &[T], dst: &[T]) -> Result<Self, <T as TryInto<u32>>::Error>
+    pub fn try_from_edge_index<T>(src: &[T], dst: &[T]) -> Result<Self, Error<Void, T>>
     where
         T: TryInto<u32> + Copy,
     {
-        let iter = src
-            .iter()
-            .zip(dst.iter())
-            .map(|a| { 
-                (*a.0).try_into()
+        if src.len() <= u32::MAX as usize && dst.len() <= u32::MAX as usize {
+            let iter = src.iter().zip(dst.iter()).map(|a| {
+                (*a.0)
+                    .try_into()
                     .and_then(|u| (*a.1).try_into().map(|v| Edge(u, v)))
+                    .map_err(Error::TryIntoU32)
             });
-        
-        let capacity = std::cmp::min(src.len(), dst.len());
 
-        Self::try_from_edges_with_capacity(capacity, iter)
+            let capacity = std::cmp::min(src.len(), dst.len());
+
+            Self::try_from_edges_with_capacity(capacity, iter)
+        }
+        else {
+            Err(Error::TooManyVertices)
+        }
     }
 
     pub fn try_from_edges<E, I>(iter: I) -> Result<Self, E>
@@ -198,4 +265,3 @@ impl<T: Into<Edge>> From<Vec<T>> for CSR
         Self::from_buffer(&mut edges[..])
     }
 }
-

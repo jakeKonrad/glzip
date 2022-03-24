@@ -16,10 +16,10 @@
 
 pub fn concat<T>(mut xs: Vec<T>, ys: Vec<T>) -> Vec<T>
 {
-    if xs.len() == 0 {
+    if xs.is_empty() {
         ys
     }
-    else if ys.len() == 0 {
+    else if ys.is_empty() {
         xs
     }
     else {

@@ -28,11 +28,7 @@
 // therefore achieve a speed up.
 //
 
-use std::{
-    ops::Range,
-    mem::MaybeUninit,
-    slice::Iter,
-};
+use std::{mem::MaybeUninit, ops::Range, slice::Iter};
 
 fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
 {
@@ -93,10 +89,8 @@ fn next_group<'a>(prev_edge: &mut u32, bytes: &mut Iter<'a, u8>) -> Option<Group
             let run_length = ((header >> 2) + 1) as usize;
             let (left, right) = bytes.as_slice().split_at(num_bytes * run_length);
             *bytes = right.iter();
-            
-            let mut buf: [MaybeUninit<u32>; 64] = unsafe {
-                MaybeUninit::uninit().assume_init()
-            };
+
+            let mut buf: [MaybeUninit<u32>; 64] = unsafe { MaybeUninit::uninit().assume_init() };
 
             match num_bytes {
                 1 => {
@@ -132,15 +126,18 @@ fn next_group<'a>(prev_edge: &mut u32, bytes: &mut Iter<'a, u8>) -> Option<Group
             }
 
             let mut p_edge = *prev_edge;
-            for i in 0..run_length {
-                let nnz = unsafe { buf[i].assume_init() };
+            for item in buf.iter_mut().take(run_length) {
+                let nnz = unsafe { item.assume_init() };
                 let sum = p_edge + nnz;
                 p_edge = sum;
-                buf[i].write(sum);
+                item.write(sum);
             }
             *prev_edge = p_edge;
 
-            Some(Group { range: 0..run_length, data: buf })
+            Some(Group {
+                range: 0..run_length,
+                data: buf,
+            })
         }
     }
 }
@@ -158,36 +155,30 @@ impl<'a> Iterator for Decoder<'a>
     fn next(&mut self) -> Option<Self::Item>
     {
         match self {
-            Self::FirstEdge(source, iter) => {
-                match first_edge(*source, iter) {
-                    Some(e) => {
-                        let mut prev_edge = e;
-                        match next_group(&mut prev_edge, iter) {
-                            Some(group) => {
-                                *self = Self::NextEdge(group, prev_edge, iter.as_slice().iter());
-                                Some(e)
-                            }
-                            None => Some(e),
+            Self::FirstEdge(source, iter) => match first_edge(*source, iter) {
+                Some(e) => {
+                    let mut prev_edge = e;
+                    match next_group(&mut prev_edge, iter) {
+                        Some(group) => {
+                            *self = Self::NextEdge(group, prev_edge, iter.clone());
+                            Some(e)
                         }
+                        None => Some(e),
+                    }
+                }
+                None => None,
+            },
+            Self::NextEdge(group, prev_edge, iter) => match group.next() {
+                Some(e) => Some(e),
+                None => match next_group(prev_edge, iter) {
+                    Some(mut group) => {
+                        let res = group.next();
+                        *self = Self::NextEdge(group, *prev_edge, iter.clone());
+                        res
                     }
                     None => None,
-                }
-            }
-            Self::NextEdge(group, prev_edge, iter) => {
-                match group.next() {
-                    Some(e) => Some(e),
-                    None => {
-                        match next_group(prev_edge, iter) {
-                            Some(mut group) => {
-                                let res = group.next();
-                                *self = Self::NextEdge(group, *prev_edge, iter.as_slice().iter());
-                                res
-                            }
-                            None => None,
-                        }
-                    }
-                }
-            }
+                },
+            },
         }
     }
 }
@@ -195,4 +186,28 @@ impl<'a> Iterator for Decoder<'a>
 pub fn decode(source: u32, bytes: &[u8]) -> Decoder<'_>
 {
     Decoder::FirstEdge(source, bytes.iter())
+}
+
+pub fn count(source: u32, bytes: &[u8]) -> usize
+{
+    let mut bytes = bytes.iter();
+
+    first_edge(source, &mut bytes);
+
+    let mut acc = 0;
+
+    loop {
+        match bytes.next() {
+            None => break,
+            Some(&header) => {
+                let num_bytes = ((header & 0x3) + 1) as usize;
+                let run_length = ((header >> 2) + 1) as usize;
+                let (_, right) = bytes.as_slice().split_at(num_bytes * run_length);
+                bytes = right.iter();
+                acc += run_length;
+            }
+        }
+    }
+
+    acc
 }
