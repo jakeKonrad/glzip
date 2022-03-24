@@ -180,7 +180,7 @@ fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[CacheP
                     Err(prev) => prev_prob = prev,
                 }
             }
-            calc_prop(u, sizes.clone(), graph, p),
+            calc_prop(u, sizes.clone(), graph, p);
         }
     }
 }
