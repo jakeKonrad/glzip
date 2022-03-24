@@ -165,25 +165,22 @@ fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[CacheP
 {
     if let Some(&k) = sizes.next() {
         for u in graph.adj(v) {
-            rayon::join(
-                || calc_prop(u, sizes.clone(), graph, p),
-                || {
-                    let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
-                    let x = &p[u as usize];
-                    let mut prev_prob = x.load(Ordering::Relaxed);
-                    loop {
-                        let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
-                        match x.compare_exchange_weak(
-                            prev_prob,
-                            new_prob,
-                            Ordering::SeqCst,
-                            Ordering::Relaxed,
-                        ) {
-                            Ok(_) => break,
-                            Err(prev) => prev_prob = prev,
-                        }
-                    }
-            });
+            let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
+            let x = &p[u as usize];
+            let mut prev_prob = x.load(Ordering::Relaxed);
+            loop {
+                let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
+                match x.compare_exchange_weak(
+                    prev_prob,
+                    new_prob,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(prev) => prev_prob = prev,
+                }
+            }
+            calc_prop(u, sizes.clone(), graph, p),
         }
     }
 }
