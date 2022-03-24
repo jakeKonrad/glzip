@@ -211,7 +211,7 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
             if train_idx[v] {
                 calc_prop(v as u32, sizes.clone(), graph, &p[..]);
             }
-        })
+        });
 
     p.into_iter()
         .map(|shared_float| f64::from_bits(shared_float.into_inner()))
