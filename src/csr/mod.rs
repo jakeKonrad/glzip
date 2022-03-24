@@ -134,8 +134,6 @@ impl CSR
         sizes: &[usize],
     ) -> (Self, Vec<u32>)
     {
-        assert!(self.order() == train_idx.len());
-
         let probs = par::probability_calculation(&self.reverse(), train_idx, sizes);
 
         let mut vs: Vec<u32> = (0u32..self.order() as u32).collect();

@@ -192,7 +192,6 @@ fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[Atomic
 
 pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
 {
-    assert!(graph.order() == train_idx.len());
     let mut p = Vec::with_capacity(train_idx.len());
 
     for &b in train_idx {
@@ -206,9 +205,13 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
 
     let sizes = sizes.iter();
 
-    (0u32..graph.order() as u32)
+    (0..train_idx.len())
         .into_par_iter()
-        .for_each(|v| calc_prop(v, sizes.clone(), graph, &p[..]));
+        .for_each(|v| {
+            if train_idx[v] {
+                calc_prop(v as u32, sizes.clone(), graph, &p[..]);
+            }
+        })
 
     p.into_iter()
         .map(|shared_float| f64::from_bits(shared_float.into_inner()))
