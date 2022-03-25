@@ -173,13 +173,16 @@ fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[CacheP
                 match x.compare_exchange_weak(
                     prev_prob,
                     new_prob,
-                    Ordering::SeqCst,
+                    Ordering::Relaxed,
                     Ordering::Relaxed,
                 ) {
                     Ok(_) => break,
                     Err(prev) => prev_prob = prev,
                 }
             }
+        }
+
+        for u in graph.adj(v) {
             calc_prop(u, sizes.clone(), graph, p);
         }
     }
