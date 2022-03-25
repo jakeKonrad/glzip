@@ -182,12 +182,9 @@ fn calc_prop(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[CacheP
             }
         }
 
-        rayon::scope(|s| {
-            for u in graph.adj(v) {
-                let new_sizes = sizes.clone();
-                s.spawn(move |_| calc_prop(u, new_sizes.clone(), graph, p));
-            }
-        });
+        for u in graph.adj(v) {
+            calc_prop(u, sizes.clone(), graph, p);
+        }
     }
 }
 
