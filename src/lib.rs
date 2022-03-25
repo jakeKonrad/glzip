@@ -18,6 +18,7 @@
 #![feature(unwrap_infallible)]
 #![feature(total_cmp)]
 #![feature(never_type)]
+#![feature(int_log)]
 
 pub mod csr;
 mod decoder;

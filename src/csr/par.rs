@@ -20,7 +20,10 @@ use std::{
     sync::atomic::{AtomicU64, AtomicUsize, Ordering}
 };
 
-use crossbeam::channel::{Sender, unbounded};
+use crossbeam::{
+    channel::{Sender, TrySendError, Receiver, bounded},
+    utils::CachePadded
+};
 
 use rayon::prelude::*;
 
@@ -187,47 +190,77 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
 }*/
 
 
-fn calc_prob(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[Sender<f64>])
+fn calc_prob(
+    v: u32,
+    mut sizes: slice::Iter<'_, usize>,
+    graph: &CSR,
+    p: &[CachePadded<AtomicU64>],
+    tx: &[Sender<f64>],
+    rx: &[Receiver<f64>])
 {
     if let Some(&k) = sizes.next() {
         let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
         for u in graph.adj(v) {
-            p[u as usize].try_send(prob);
-            calc_prob(u, sizes.clone(), graph, p)
+            let i = u as usize;
+            match tx[i].try_send(prob) {
+                Ok(()) => {},
+                Err(TrySendError::Full(prob)) => {
+                    let prob = prob + rx[i].try_iter().sum::<f64>();
+                    let x = &p[i];
+                    let mut prev_prob = x.load(Ordering::Relaxed);
+                    loop {
+                        let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
+                        match x.compare_exchange_weak(
+                            prev_prob,
+                            new_prob,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        ) {
+                            Ok(_) => break,
+                            Err(prev) => prev_prob = prev,
+                        }
+                    }
+                }
+                Err(_) => unreachable!(),
+            }
+            calc_prob(u, sizes.clone(), graph, p, tx, rx);
         }
     }
 }
 
 pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
 {
-    let (p, r): (Vec<Sender<f64>>, Vec<_>) = std::iter::repeat_with(unbounded)
+    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(train_idx.len().log2() as usize))
         .take(train_idx.len())
         .unzip();
+
+    let p: Vec<CachePadded<AtomicU64>> = train_idx
+        .iter()
+        .map(|&b| {
+            if b {
+                CachePadded::new(AtomicU64::new(1f64.to_bits()))
+            }
+            else {
+                CachePadded::new(AtomicU64::new(0f64.to_bits()))
+            }
+        })
+        .collect();
 
     let sizes = sizes.iter();
 
     (0..train_idx.len()).into_par_iter().for_each(|v| {
         if train_idx[v] {
-            calc_prob(v as u32, sizes.clone(), graph, &p[..]);
+            calc_prob(v as u32, sizes.clone(), graph, &p[..], &tx[..], &rx[..]);
         }
     });
 
-    std::mem::drop(p);
+    std::mem::drop(tx);
 
-    r.into_par_iter()
+    p.into_par_iter()
         .enumerate()
-        .map(|(v, rx)| {
-            let mut prob: f64;
-            if train_idx[v] {
-                prob = 1f64;
-            }
-            else {
-                prob = 0f64;
-            }
-            for f in rx {
-                prob += f;
-            }
-            prob
+        .map(|(v, shared_float)| {
+            let prob = f64::from_bits(shared_float.into_inner().into_inner());
+            prob + rx[v].iter().sum::<f64>()
         })
         .collect()
 }   
