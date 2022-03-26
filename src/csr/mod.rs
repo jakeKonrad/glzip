@@ -47,6 +47,7 @@ impl<'a> Iterator for Adj<'a>
 /// The Compressed Sparse Row struct.
 pub struct CSR
 {
+    num_nodes: usize,
     vertices: Vec<usize>,
     num_edges: usize,
     edges: Vec<u8>,
@@ -105,9 +106,10 @@ impl CSR
 
     fn from_buffer(buf: &mut [Edge]) -> Self
     {
-        let (vertices, num_edges, edges) = par::edgelist_to_csr(buf);
+        let (num_nodes, vertices, num_edges, edges) = par::edgelist_to_csr(buf);
 
         Self {
+            num_nodes,
             vertices,
             num_edges,
             edges,
@@ -125,12 +127,12 @@ impl CSR
     /// The number of vertices in the graph.
     pub fn order(&self) -> usize
     {
-        self.vertices.len().saturating_sub(1)
+        self.num_nodes
     }
 
     pub fn optimize(&self, train_idx: &[bool], sizes: &[usize]) -> (Self, Vec<u32>)
     {
-        let probs = par::probability_calculation(&self.reverse(), train_idx, sizes);
+        let probs = par::probability_calculation(self, train_idx, sizes);
 
         let mut vs: Vec<u32> = (0u32..self.order() as u32).collect();
 

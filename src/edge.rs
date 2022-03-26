@@ -1,4 +1,4 @@
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct Edge(pub u32, pub u32);
 
 impl<T: Into<u32>> From<[T; 2]> for Edge

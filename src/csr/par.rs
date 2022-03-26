@@ -17,12 +17,11 @@
 use std::{
     ops::Add,
     slice,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering}
+    sync::atomic::{AtomicUsize, Ordering}
 };
 
 use crossbeam::{
-    channel::{Sender, TrySendError, Receiver, bounded},
-    utils::CachePadded
+    channel::{Sender, Receiver, bounded}
 };
 
 use rayon::prelude::*;
@@ -141,9 +140,13 @@ fn rec_edgelist_to_csr(
     }
 }
 
-pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
+pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (usize, Vec<usize>, usize, Vec<u8>)
 {
     edgelist.par_sort_unstable();
+
+    let last_edge = edgelist[edgelist.len().saturating_sub(1)];
+
+    let num_nodes = std::cmp::max(last_edge.0, last_edge.1);
 
     let global_num_edges = AtomicUsize::new(0usize);
 
@@ -162,131 +165,88 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
 
     indptr.shrink_to_fit();
 
-    (indptr, global_num_edges.into_inner(), edges)
+    (num_nodes as usize, indptr, global_num_edges.into_inner(), edges)
 }
-
-/*fn calc_prob(v: u32, mut sizes: slice::Iter<'_, usize>, graph: &CSR, p: &[CachePadded<AtomicU64>])
-{
-    if let Some(&k) = sizes.next() {
-        for u in graph.adj(v) {
-            let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
-            let x = &p[u as usize];
-            let mut prev_prob = x.load(Ordering::Relaxed);
-            loop {
-                let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
-                match x.compare_exchange_weak(
-                    prev_prob,
-                    new_prob,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => break,
-                    Err(prev) => prev_prob = prev,
-                }
-            }
-            calc_prob(u, sizes.clone(), graph, p);
-        }
-    }
-}*/
-
 
 fn calc_prob(
     v: u32,
+    weight: f64,
     mut sizes: slice::Iter<'_, usize>,
-    graph: &CSR,
-    p: &[CachePadded<AtomicU64>],
-    tx: &[Sender<f64>],
-    rx: &[Receiver<f64>])
+    incoming: &CSR,
+    threshold: usize,
+    in_degree: &[usize],
+    out_degree: &[usize],
+    tx: &[Sender<f64>])
 {
     if let Some(&k) = sizes.next() {
-        let prob = k as f64 / (std::cmp::max(graph.degree(v), k) as f64);
-        for u in graph.adj(v) {
-            let i = u as usize;
-            match tx[i].try_send(prob) {
-                Ok(()) => {},
-                Err(TrySendError::Full(prob)) => {
-                    let prob = prob + rx[i].try_iter().sum::<f64>();
-                    let x = &p[i];
-                    let mut prev_prob = x.load(Ordering::Relaxed);
-                    loop {
-                        let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
-                        match x.compare_exchange_weak(
-                            prev_prob,
-                            new_prob,
-                            Ordering::Relaxed,
-                            Ordering::Relaxed,
-                        ) {
-                            Ok(_) => break,
-                            Err(prev) => prev_prob = prev,
-                        }
+        let v_ix = v as usize; 
+        if in_degree[v_ix] < threshold {
+            let prob = (k as f64 / (std::cmp::max(in_degree[v_ix], k) as f64)) * weight;
+            for u in incoming.adj(v) {
+                let u_ix = u as usize;
+                if out_degree[u_ix] < threshold {
+                    match tx[u_ix].try_send(prob) {
+                        Ok(()) => {},
+                        Err(_) => unreachable!(),
                     }
+                    calc_prob(u, prob, sizes.clone(), incoming, threshold, in_degree, out_degree, tx);
                 }
-                Err(_) => unreachable!(),
             }
-            calc_prob(u, sizes.clone(), graph, p, tx, rx);
         }
     }
 }
 
-pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
+pub fn probability_calculation(
+    graph: &CSR,
+    train_idx: &[bool],
+    sizes: &[usize]) -> Vec<f64>
 {
-    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(train_idx.len().log2() as usize))
-        .take(train_idx.len())
-        .unzip();
+    let incoming = graph.reverse();
+    let threshold = (graph.order() as f64).sqrt().ceil() as usize;
 
-    let p: Vec<CachePadded<AtomicU64>> = train_idx
-        .iter()
-        .map(|&b| {
-            if b {
-                CachePadded::new(AtomicU64::new(1f64.to_bits()))
-            }
-            else {
-                CachePadded::new(AtomicU64::new(0f64.to_bits()))
-            }
-        })
+    let num_nodes = graph.order() as u32;
+
+    let out_degree: Vec<usize> = (0u32..num_nodes)
+        .into_par_iter()
+        .map(|v| graph.degree(v))
         .collect();
+
+    let in_degree: Vec<usize> = (0u32..num_nodes)
+        .into_par_iter()
+        .map(|v| incoming.degree(v))
+        .collect();
+
+    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(threshold))
+        .take(graph.order())
+        .unzip();
 
     let sizes = sizes.iter();
 
-    (0..train_idx.len()).into_par_iter().for_each(|v| {
+    (0..graph.order()).into_par_iter().for_each(|v| {
         if train_idx[v] {
-            calc_prob(v as u32, sizes.clone(), graph, &p[..], &tx[..], &rx[..]);
+            calc_prob(v as u32, 1f64, sizes.clone(), &incoming, threshold, &in_degree[..], &out_degree[..], &tx[..]);
         }
     });
 
     std::mem::drop(tx);
 
-    p.into_par_iter()
+    rx.into_par_iter()
         .enumerate()
-        .map(|(v, shared_float)| {
-            let prob = f64::from_bits(shared_float.into_inner().into_inner());
-            prob + rx[v].iter().sum::<f64>()
+        .map(|(v, msgs)| {
+            if out_degree[v] >= threshold {
+                f64::MAX
+            }
+            else {
+                let prob: f64;
+                if train_idx[v] {
+                    prob = 1f64;
+                }
+                else {
+                    prob = 0f64;
+                }
+                prob + msgs.iter().sum::<f64>()
+            }
         })
         .collect()
 }   
 
-/*pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
-{
-    let mut p = Vec::with_capacity(train_idx.len());
-
-    for &b in train_idx {
-        if b {
-            p.push(CachePadded::new(AtomicU64::new(1f64.to_bits())));
-        }
-        else {
-            p.push(CachePadded::new(AtomicU64::new(0f64.to_bits())));
-        }
-    }
-
-    let sizes = sizes.iter();
-
-    (0..train_idx.len()).into_par_iter().for_each(|v| {
-        if train_idx[v] {
-            calc_prob(v as u32, sizes.clone(), graph, &p[..]);
-        }
-    });
-
-    p.into_iter()
-        .map(|shared_float| f64::from_bits(shared_float.into_inner().into_inner()))
-        .collect()
-}*/
