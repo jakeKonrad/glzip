@@ -47,7 +47,6 @@ impl<'a> Iterator for Adj<'a>
 /// The Compressed Sparse Row struct.
 pub struct CSR
 {
-    num_nodes: usize,
     vertices: Vec<usize>,
     num_edges: usize,
     edges: Vec<u8>,
