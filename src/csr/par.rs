@@ -248,7 +248,7 @@ pub fn probability_calculation(
         })
         .collect();
 
-    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(threshold))
+    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(graph.order().log2() as usize))
         .take(graph.order())
         .unzip();
 
