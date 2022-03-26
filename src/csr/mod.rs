@@ -132,6 +132,8 @@ impl CSR
     {
         let probs = par::probability_calculation(self, train_idx, sizes);
 
+        println!("{:?}", probs);
+
         let mut vs: Vec<u32> = (0u32..self.order() as u32).collect();
 
         // sort by descending probability

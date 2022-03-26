@@ -17,14 +17,13 @@
 use std::{
     ops::Add,
     slice,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering}
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use crossbeam::{
-    channel::{Sender, TrySendError, Receiver, bounded},
-    utils::CachePadded
+    channel::{bounded, Receiver, Sender, TrySendError},
+    utils::CachePadded,
 };
-
 use rayon::prelude::*;
 
 use crate::{encoder, iter::*, vec, Edge, CSR};
@@ -175,17 +174,18 @@ fn calc_prob(
     out_degree: &[usize],
     p: &[CachePadded<AtomicU64>],
     tx: &[Sender<f64>],
-    rx: &[Receiver<f64>])
+    rx: &[Receiver<f64>],
+)
 {
     if let Some(&k) = sizes.next() {
-        let v_ix = v as usize; 
+        let v_ix = v as usize;
         if in_degree[v_ix] < threshold {
             let prob = (k as f64 / (std::cmp::max(in_degree[v_ix], k) as f64)) * weight;
             for u in incoming.adj(v) {
                 let u_ix = u as usize;
                 if out_degree[u_ix] < threshold {
                     match tx[u_ix].try_send(prob) {
-                        Ok(()) => {},
+                        Ok(()) => {}
                         Err(TrySendError::Full(prob)) => {
                             let prob = prob + rx[u_ix].try_iter().sum::<f64>();
                             let x = &p[u_ix];
@@ -205,17 +205,25 @@ fn calc_prob(
                         }
                         Err(_) => unreachable!(),
                     }
-                    calc_prob(u, prob, sizes.clone(), incoming, threshold, in_degree, out_degree, p, tx, rx);
+                    calc_prob(
+                        u,
+                        prob,
+                        sizes.clone(),
+                        incoming,
+                        threshold,
+                        in_degree,
+                        out_degree,
+                        p,
+                        tx,
+                        rx,
+                    );
                 }
             }
         }
     }
 }
 
-pub fn probability_calculation(
-    graph: &CSR,
-    train_idx: &[bool],
-    sizes: &[usize]) -> Vec<f64>
+pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
 {
     let incoming = graph.reverse();
     let threshold = (graph.order() as f64).sqrt().ceil() as usize;
@@ -244,15 +252,27 @@ pub fn probability_calculation(
         })
         .collect();
 
-    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(graph.order().log2() as usize))
-        .take(graph.order())
-        .unzip();
+    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) =
+        std::iter::repeat_with(|| bounded(graph.order().log2() as usize))
+            .take(graph.order())
+            .unzip();
 
     let sizes = sizes.iter();
 
     (0..graph.order()).into_par_iter().for_each(|v| {
         if train_idx[v] {
-            calc_prob(v as u32, 1f64, sizes.clone(), &incoming, threshold, &in_degree[..], &out_degree[..], &p[..], &tx[..], &rx[..]);
+            calc_prob(
+                v as u32,
+                1f64,
+                sizes.clone(),
+                &incoming,
+                threshold,
+                &in_degree[..],
+                &out_degree[..],
+                &p[..],
+                &tx[..],
+                &rx[..],
+            );
         }
     });
 
@@ -270,5 +290,5 @@ pub fn probability_calculation(
             }
         })
         .collect()
-}   
+}
 
