@@ -216,7 +216,7 @@ pub fn probability_calculation(
         .map(|v| incoming.degree(v))
         .collect();
 
-    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(threshold))
+    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) = std::iter::repeat_with(|| bounded(threshold + 1))
         .take(graph.order())
         .unzip();
 
