@@ -28,7 +28,12 @@
 // therefore achieve a speed up.
 //
 
-use std::{mem::MaybeUninit, ops::Range, slice::Iter};
+use std::{
+    mem::MaybeUninit,
+    ops::Range,
+    slice::Iter,
+    simd::{Simd, u32x4},
+};
 
 fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
 {
@@ -80,6 +85,9 @@ impl Iterator for Group
     }
 }
 
+const SHIFT3: u32x4 = Simd::from_array([0, 16, 8, 0]);
+const SHIFT4: u32x4 = Simd::from_array([24, 16, 8, 0]);
+
 fn next_group<'a>(prev_edge: &mut u32, bytes: &mut Iter<'a, u8>) -> Option<Group>
 {
     match bytes.next() {
@@ -94,32 +102,29 @@ fn next_group<'a>(prev_edge: &mut u32, bytes: &mut Iter<'a, u8>) -> Option<Group
 
             match num_bytes {
                 1 => {
-                    for (i, chunk) in left.chunks_exact(1).enumerate() {
-                        buf[i].write(chunk[0] as u32);
+                    for (&byte, dst) in left.iter().zip(buf.iter_mut()) {
+                        dst.write(byte as u32);
                     }
                 }
                 2 => {
-                    for (i, chunk) in left.chunks_exact(2).enumerate() {
+                    for (chunk, dst) in left.chunks_exact(2).zip(buf.iter_mut()) {
                         let mut diff = (chunk[0] as u32) << 8;
                         diff |= chunk[1] as u32;
-                        buf[i].write(diff);
+                        dst.write(diff);
                     }
                 }
                 3 => {
-                    for (i, chunk) in left.chunks_exact(3).enumerate() {
-                        let mut diff = (chunk[0] as u32) << 16;
-                        diff |= (chunk[1] as u32) << 8;
-                        diff |= chunk[2] as u32;
-                        buf[i].write(diff);
+                    for (chunk, dst) in left.chunks_exact(3).zip(buf.iter_mut()) {
+                        let mut x: u32x4 = Simd::from_array([0u32, chunk[0] as u32, chunk[1] as u32, chunk[2] as u32]);
+                        x <<= SHIFT3;
+                        dst.write(x.reduce_or());
                     }
                 }
                 4 => {
-                    for (i, chunk) in left.chunks_exact(4).enumerate() {
-                        let mut diff = (chunk[0] as u32) << 24;
-                        diff |= (chunk[1] as u32) << 16;
-                        diff |= (chunk[2] as u32) << 8;
-                        diff |= chunk[3] as u32;
-                        buf[i].write(diff);
+                    for (chunk, dst) in left.chunks_exact(4).zip(buf.iter_mut()) {
+                        let mut x = Simd::from_array([chunk[0] as u32, chunk[1] as u32, chunk[2] as u32, chunk[3] as u32]);
+                        x <<= SHIFT4;
+                        dst.write(x.reduce_or());
                     }
                 }
                 _ => unreachable!(),
