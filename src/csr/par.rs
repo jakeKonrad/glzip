@@ -141,13 +141,9 @@ fn rec_edgelist_to_csr(
     }
 }
 
-pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (usize, Vec<usize>, usize, Vec<u8>)
+pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
 {
     edgelist.par_sort_unstable();
-
-    let last_edge = edgelist[edgelist.len().saturating_sub(1)];
-
-    let num_nodes = std::cmp::max(last_edge.0, last_edge.1);
 
     let global_num_edges = AtomicUsize::new(0usize);
 
@@ -166,7 +162,7 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (usize, Vec<usize>, usize, Vec<
 
     indptr.shrink_to_fit();
 
-    (num_nodes as usize, indptr, global_num_edges.into_inner(), edges)
+    (indptr, global_num_edges.into_inner(), edges)
 }
 
 fn calc_prob(

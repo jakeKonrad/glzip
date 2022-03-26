@@ -106,10 +106,9 @@ impl CSR
 
     fn from_buffer(buf: &mut [Edge]) -> Self
     {
-        let (num_nodes, vertices, num_edges, edges) = par::edgelist_to_csr(buf);
+        let (vertices, num_edges, edges) = par::edgelist_to_csr(buf);
 
         Self {
-            num_nodes,
             vertices,
             num_edges,
             edges,
@@ -127,7 +126,7 @@ impl CSR
     /// The number of vertices in the graph.
     pub fn order(&self) -> usize
     {
-        self.num_nodes
+        self.vertices.len().saturating_sub(1)
     }
 
     pub fn optimize(&self, train_idx: &[bool], sizes: &[usize]) -> (Self, Vec<u32>)
