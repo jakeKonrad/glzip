@@ -27,6 +27,8 @@ use crate::{
     Edge,
 };
 
+use rayon::slice::ParallelSliceMut;
+
 mod par;
 
 pub struct Adj<'a>(Option<decoder::Decoder<'a>>);
@@ -131,13 +133,11 @@ impl CSR
     pub fn optimize(&self, train_idx: &[bool], sizes: &[usize]) -> (Self, Vec<u32>)
     {
         let probs = par::probability_calculation(self, train_idx, sizes);
-
-        println!("{:?}", probs);
-
+        
         let mut vs: Vec<u32> = (0u32..self.order() as u32).collect();
 
         // sort by descending probability
-        vs.sort_unstable_by(|&a, &b| probs[b as usize].total_cmp(&probs[a as usize]));
+        vs.par_sort_unstable_by(|&a, &b| probs[b as usize].total_cmp(&probs[a as usize]));
 
         (self.reorder(&vs[..]), vs)
     }
