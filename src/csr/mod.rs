@@ -112,6 +112,11 @@ impl CSR
         self.vertices.len().saturating_sub(1)
     }
 
+    pub fn probabilities(&self, train_idx: &[bool], sizes: &[usize]) -> Vec<f64>
+    {
+        par::probability_calculation(self, train_idx, sizes)
+    }
+
     pub fn optimize(&self, train_idx: &[bool], sizes: &[usize]) -> (Self, Vec<u32>)
     {
         let probs = par::probability_calculation(self, train_idx, sizes);

@@ -177,7 +177,7 @@ fn calc_prob(
         let v_ix = v as usize;
         if in_degree[v_ix] < threshold {
             let prob = (k as f64 / (std::cmp::max(in_degree[v_ix], k) as f64)) * weight;
-            incoming.adj_map_par(v, |u| {
+            incoming.adj_map(v, |u| {
                 let u_ix = u as usize;
                 if out_degree[u_ix] < threshold {
                     let mut new_prob = prob;
