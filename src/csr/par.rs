@@ -231,7 +231,7 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
 
     let sizes = sizes.iter();
 
-    for v in 0..graph.order() {
+    (0..graph.order()).into_par_iter().for_each(|v| {
         if train_idx[v] {
             calc_prob(
                 v as u32,
@@ -245,7 +245,7 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
                 &rx[..],
             );
         }
-    }
+    });
 
     std::mem::drop(tx);
 
