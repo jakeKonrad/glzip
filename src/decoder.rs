@@ -28,14 +28,7 @@
 // therefore achieve a speed up.
 //
 
-use std::{
-    mem::MaybeUninit,
-    ops::Range,
-    slice::Iter,
-};
-
-use rayon::iter::IntoParallelIterator;
- use rayon::iter::ParallelIterator;
+use std::{mem::MaybeUninit, slice::Iter};
 
 fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
 {
@@ -70,16 +63,12 @@ fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
     }
 }
 
-fn next_groups_map<'a, OP>(
-    prev_edge: u32,
-    mut bytes: Iter<'a, u8>, 
-    mut op: OP
-)
+fn next_groups_map<'a, OP>(prev_edge: u32, mut bytes: Iter<'a, u8>, mut op: OP)
 where
     OP: FnMut(u32),
 {
     match bytes.next() {
-        None => {},
+        None => {}
         Some(&header) => {
             let num_bytes = ((header & 0x3) + 1) as usize;
             let run_length = ((header >> 2) + 1) as usize;
@@ -138,7 +127,7 @@ where
     OP: FnMut(u32),
 {
     let mut bytes = bytes.iter();
-    let mut prev_edge = match first_edge(source, &mut bytes) {
+    let prev_edge = match first_edge(source, &mut bytes) {
         Some(e) => {
             op(e);
             e
@@ -149,32 +138,23 @@ where
     next_groups_map(prev_edge, bytes, op);
 }
 
-fn group_map_par<'a, OP>(
-    buf: [MaybeUninit<u32>; 64],
-    run_length: usize,
-    op: OP)
+fn group_map_par<'a, OP>(buf: [MaybeUninit<u32>; 64], run_length: usize, op: OP)
 where
     OP: Fn(u32),
 {
-    buf[0..run_length]
-        .iter()
-        .for_each(|u| {
-            let u = unsafe { u.assume_init() };
-            op(u);
-        });
+    buf[0..run_length].iter().for_each(|u| {
+        let u = unsafe { u.assume_init() };
+        op(u);
+    });
 }
 
-fn next_groups_map_par<'a, OP>(
-    prev_edge: u32,
-    bytes: &[u8], 
-    op: OP
-)
+fn next_groups_map_par<'a, OP>(prev_edge: u32, bytes: &[u8], op: OP)
 where
     OP: Fn(u32) + Sync + Send + Copy,
 {
     let mut bytes = bytes.iter();
     match bytes.next() {
-        None => {},
+        None => {}
         Some(&header) => {
             let num_bytes = ((header & 0x3) + 1) as usize;
             let run_length = ((header >> 2) + 1) as usize;
@@ -223,8 +203,10 @@ where
                 item.write(edge);
             }
 
-            rayon::join(|| group_map_par(buf, run_length, op),
-                        || next_groups_map_par(p_edge, right, op));
+            rayon::join(
+                || group_map_par(buf, run_length, op),
+                || next_groups_map_par(p_edge, right, op),
+            );
         }
     }
 }
@@ -239,8 +221,10 @@ where
         None => return,
     };
 
-    rayon::join(|| op(prev_edge),
-                || next_groups_map_par(prev_edge, bytes.as_slice(), op));
+    rayon::join(
+        || op(prev_edge),
+        || next_groups_map_par(prev_edge, bytes.as_slice(), op),
+    );
 }
 
 pub fn count(source: u32, bytes: &[u8]) -> usize
@@ -249,7 +233,7 @@ pub fn count(source: u32, bytes: &[u8]) -> usize
 
     match first_edge(source, &mut bytes) {
         None => return 0,
-        Some(_) => {},
+        Some(_) => {}
     }
 
     let mut acc = 1;

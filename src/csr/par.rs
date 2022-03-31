@@ -17,21 +17,17 @@
 use std::{
     ops::Add,
     slice,
-    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
-    simd::{Simd, SimdElement, LaneCount, SupportedLaneCount},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crossbeam::{
-    channel::{bounded, Receiver, Sender, TrySendError},
-    utils::CachePadded,
-};
+use crossbeam::channel::{bounded, Receiver, Sender, TrySendError};
 use rayon::prelude::*;
 
 use crate::{encoder, iter::*, vec, Edge, CSR};
 
 pub fn exclusive_sum<T>(init: T, vect: Vec<T>) -> Vec<T>
 where
-    T: Add<Output = T> + Copy + Sized + Send
+    T: Add<Output = T> + Copy + Sized + Send,
 {
     rayon::iter::once(init)
         .chain(vect.into_par_iter())
@@ -235,7 +231,7 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
 
     let sizes = sizes.iter();
 
-    (0..graph.order()).into_par_iter().for_each(|v| {
+    for v in 0..graph.order() {
         if train_idx[v] {
             calc_prob(
                 v as u32,
@@ -249,7 +245,7 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
                 &rx[..],
             );
         }
-    });
+    }
 
     std::mem::drop(tx);
 
@@ -266,4 +262,3 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
         })
         .collect()
 }
-

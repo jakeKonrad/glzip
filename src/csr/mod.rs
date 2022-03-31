@@ -20,14 +20,13 @@
 
 use std::convert::TryInto;
 
+use rayon::slice::ParallelSliceMut;
+
 use crate::{
     decoder,
     error::{Error, Void},
-    iter::IteratorFlipExt,
     Edge,
 };
-
-use rayon::slice::ParallelSliceMut;
 
 mod par;
 
@@ -42,7 +41,7 @@ pub struct CSR
 impl CSR
 {
     pub fn adj_map<OP>(&self, source: u32, op: OP)
-    where 
+    where
         OP: FnMut(u32),
     {
         let i = source as usize;
@@ -78,7 +77,7 @@ impl CSR
             .unwrap_or(0usize)
     }
 
-    pub fn edge_map<OP>(&self, mut op: OP) 
+    pub fn edge_map<OP>(&self, mut op: OP)
     where
         OP: FnMut(Edge),
     {
@@ -116,7 +115,7 @@ impl CSR
     pub fn optimize(&self, train_idx: &[bool], sizes: &[usize]) -> (Self, Vec<u32>)
     {
         let probs = par::probability_calculation(self, train_idx, sizes);
-        
+
         let mut vs: Vec<u32> = (0u32..self.order() as u32).collect();
 
         // sort by descending probability
