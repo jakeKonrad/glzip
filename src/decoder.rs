@@ -154,10 +154,9 @@ fn group_map_par<'a, OP>(
     run_length: usize,
     op: OP)
 where
-    OP: Fn(u32) + Sync + Send,
+    OP: Fn(u32),
 {
     buf[0..run_length]
-        .into_par_iter()
         .for_each(|u| {
             let u = unsafe { u.assume_init() };
             op(u);
