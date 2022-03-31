@@ -157,6 +157,7 @@ where
     OP: Fn(u32),
 {
     buf[0..run_length]
+        .iter()
         .for_each(|u| {
             let u = unsafe { u.assume_init() };
             op(u);
