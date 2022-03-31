@@ -40,30 +40,16 @@ pub struct CSR
 
 impl CSR
 {
-    pub fn adj_map<OP>(&self, source: u32, op: OP)
-    where
-        OP: FnMut(u32),
+    pub fn adj(&self, source: u32) -> impl Iterator<Item = u32> + '_
     {
         let i = source as usize;
-        if let Some(&start) = self.vertices.get(i) {
-            if let Some(&end) = self.vertices.get(i + 1) {
-                decoder::decode_map(source, &self.edges[start..end], op);
-            }
-        }
+        self.vertices.get(i).into_iter().flat_map(move |&start| {
+            self.vertices.get(i + 1).into_iter().flat_map(move |&end| {
+                decoder::decode(source, &self.edges[start..end])
+            })
+        })
     }
-
-    pub fn adj_map_par<OP>(&self, source: u32, op: OP)
-    where
-        OP: Fn(u32) + Sync + Send + Copy,
-    {
-        let i = source as usize;
-        if let Some(&start) = self.vertices.get(i) {
-            if let Some(&end) = self.vertices.get(i + 1) {
-                decoder::decode_map_par(source, &self.edges[start..end], op);
-            }
-        }
-    }
-
+    
     pub fn degree(&self, source: u32) -> usize
     {
         let i = source as usize;
@@ -77,13 +63,11 @@ impl CSR
             .unwrap_or(0usize)
     }
 
-    pub fn edge_map<OP>(&self, mut op: OP)
-    where
-        OP: FnMut(Edge),
+    pub fn edges(&self) -> impl Iterator<Item = Edge> + '_
     {
-        (0u32..self.order() as u32).for_each(|u| {
+        (0u32..self.order() as u32).flat_map(|u| {
             let u = u as u32;
-            self.adj_map(u, |v| op(Edge(u, v)))
+            self.adj(u).map(move |v| Edge(u, v))
         })
     }
 
@@ -133,7 +117,7 @@ impl CSR
     {
         let mut buf = Vec::with_capacity(self.size());
 
-        self.edge_map(|Edge(u, v)| {
+        self.edges().for_each(|Edge(u, v)| {
             buf.push(Edge(v, u));
         });
 
@@ -144,7 +128,7 @@ impl CSR
     {
         let mut buf = Vec::with_capacity(self.size());
 
-        self.edge_map(|Edge(u, v)| {
+        self.edges().for_each(|Edge(u, v)| {
             buf.push(Edge(perm[u as usize], perm[v as usize]));
         });
 
