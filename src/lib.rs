@@ -19,6 +19,8 @@
 #![feature(total_cmp)]
 #![feature(never_type)]
 #![feature(int_log)]
+#![feature(slice_as_chunks)]
+#![feature(slice_split_at_unchecked)]
 
 pub mod csr;
 mod decoder;

@@ -44,12 +44,13 @@ impl CSR
     {
         let i = source as usize;
         self.vertices.get(i).into_iter().flat_map(move |&start| {
-            self.vertices.get(i + 1).into_iter().flat_map(move |&end| {
-                decoder::decode(source, &self.edges[start..end])
-            })
+            self.vertices
+                .get(i + 1)
+                .into_iter()
+                .flat_map(move |&end| decoder::decode(source, &self.edges[start..end]))
         })
     }
-    
+
     pub fn degree(&self, source: u32) -> usize
     {
         let i = source as usize;

@@ -28,13 +28,7 @@
 // therefore achieve a speed up.
 //
 
-use std::{
-    ops::Range,
-    mem::MaybeUninit,
-    slice::Iter,
-    iter,
-    hint::unreachable_unchecked,
-};
+use std::{hint::unreachable_unchecked, iter, mem::MaybeUninit, ops::Range, slice::Iter};
 
 fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
 {
@@ -103,11 +97,16 @@ impl<'a> Iterator for Groups<'a>
             Some(&header) => {
                 let num_bytes = ((header & 0x3) + 1) as usize;
                 let run_length = ((header >> 2) + 1) as usize;
-                let (left, right) = self.bytes.as_slice().split_at(num_bytes * run_length);
+                let (left, right) = unsafe {
+                    self.bytes
+                        .as_slice()
+                        .split_at_unchecked(num_bytes * run_length)
+                };
 
                 self.bytes = right.iter();
 
-                let mut buf: [MaybeUninit<u32>; 64] = unsafe { MaybeUninit::uninit().assume_init() };
+                let mut buf: [MaybeUninit<u32>; 64] =
+                    unsafe { MaybeUninit::uninit().assume_init() };
 
                 match num_bytes {
                     1 => {
@@ -116,14 +115,20 @@ impl<'a> Iterator for Groups<'a>
                         }
                     }
                     2 => {
-                        for (chunk, dst) in left.chunks_exact(2).zip(buf.iter_mut()) {
+                        for (chunk, dst) in (unsafe { left.as_chunks_unchecked::<2>() })
+                            .iter()
+                            .zip(buf.iter_mut())
+                        {
                             let mut diff = (chunk[0] as u32) << 8;
                             diff |= chunk[1] as u32;
                             dst.write(diff);
                         }
                     }
                     3 => {
-                        for (chunk, dst) in left.chunks_exact(3).zip(buf.iter_mut()) {
+                        for (chunk, dst) in (unsafe { left.as_chunks_unchecked::<3>() })
+                            .iter()
+                            .zip(buf.iter_mut())
+                        {
                             let mut diff = (chunk[0] as u32) << 16;
                             diff |= (chunk[1] as u32) << 8;
                             diff |= chunk[2] as u32;
@@ -131,7 +136,10 @@ impl<'a> Iterator for Groups<'a>
                         }
                     }
                     4 => {
-                        for (chunk, dst) in left.chunks_exact(4).zip(buf.iter_mut()) {
+                        for (chunk, dst) in (unsafe { left.as_chunks_unchecked::<4>() })
+                            .iter()
+                            .zip(buf.iter_mut())
+                        {
                             let mut diff = (chunk[0] as u32) << 24;
                             diff |= (chunk[1] as u32) << 16;
                             diff |= (chunk[2] as u32) << 8;
@@ -166,10 +174,15 @@ pub fn decode(source: u32, bytes: &[u8]) -> impl Iterator<Item = u32> + '_
     first_edge(source, &mut bytes)
         .into_iter()
         .flat_map(move |edge| {
-            iter::once(edge).chain((Groups { prev_edge: edge, bytes: bytes.clone() }).flatten())
+            iter::once(edge).chain(
+                (Groups {
+                    prev_edge: edge,
+                    bytes: bytes.clone(),
+                })
+                .flatten(),
+            )
         })
 }
-
 
 pub fn count(source: u32, bytes: &[u8]) -> usize
 {
@@ -188,7 +201,8 @@ pub fn count(source: u32, bytes: &[u8]) -> usize
             Some(&header) => {
                 let num_bytes = ((header & 0x3) + 1) as usize;
                 let run_length = ((header >> 2) + 1) as usize;
-                let (_, right) = bytes.as_slice().split_at(num_bytes * run_length);
+                let (_, right) =
+                    unsafe { bytes.as_slice().split_at_unchecked(num_bytes * run_length) };
                 bytes = right.iter();
                 acc += run_length;
             }
