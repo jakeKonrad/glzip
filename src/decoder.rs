@@ -33,6 +33,7 @@ use std::{
     mem::MaybeUninit,
     slice::Iter,
     iter,
+    hint::unreachable_unchecked,
 };
 
 fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
@@ -54,7 +55,7 @@ fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
                                 break;
                             }
                         }
-                        None => unreachable!(),
+                        None => unsafe { unreachable_unchecked() },
                     }
                 }
             }
@@ -138,7 +139,7 @@ impl<'a> Iterator for Groups<'a>
                             dst.write(diff);
                         }
                     }
-                    _ => unreachable!(),
+                    _ => unsafe { unreachable_unchecked() },
                 }
 
                 let mut p_edge = self.prev_edge;
