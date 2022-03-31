@@ -5,5 +5,7 @@ edition = "2021"
 
 [dependencies]
 rayon = "1.5.1"
-rand = "0.8.5"
 crossbeam = "0.8.1"
+
+[build-dependencies]
+cc = "1.0.73"

@@ -31,21 +31,6 @@ use rayon::slice::ParallelSliceMut;
 
 mod par;
 
-pub struct Adj<'a>(Option<decoder::Decoder<'a>>);
-
-impl<'a> Iterator for Adj<'a>
-{
-    type Item = u32;
-
-    fn next(&mut self) -> Option<Self::Item>
-    {
-        match &mut self.0 {
-            Some(iter) => iter.next(),
-            None => None,
-        }
-    }
-}
-
 /// The Compressed Sparse Row struct.
 pub struct CSR
 {
@@ -56,32 +41,28 @@ pub struct CSR
 
 impl CSR
 {
-    /// The edges adjacent to a vertex.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use glzip::CSR;
-    ///
-    /// let csr = CSR::from(vec![
-    ///     [0u32,1],
-    ///     [0,2],
-    ///     [1,0],
-    ///     [2,1],
-    /// ]);
-    ///
-    /// assert_eq!(vec![1,2], csr.adj(0).collect::<Vec<_>>());
-    /// assert_eq!(vec![0], csr.adj(1).collect::<Vec<_>>());
-    /// assert_eq!(vec![1], csr.adj(2).collect::<Vec<_>>());
-    /// ```
-    pub fn adj(&self, source: u32) -> Adj<'_>
+    pub fn adj_map<OP>(&self, source: u32, op: OP)
+    where 
+        OP: FnMut(u32),
     {
         let i = source as usize;
-        Adj(self.vertices.get(i).and_then(move |&start| {
-            self.vertices
-                .get(i + 1)
-                .map(|&end| decoder::decode(source, &self.edges[start..end]))
-        }))
+        if let Some(&start) = self.vertices.get(i) {
+            if let Some(&end) = self.vertices.get(i + 1) {
+                decoder::decode_map(source, &self.edges[start..end], op);
+            }
+        }
+    }
+
+    pub fn adj_map_par<OP>(&self, source: u32, op: OP)
+    where
+        OP: Fn(u32) + Sync + Send + Copy,
+    {
+        let i = source as usize;
+        if let Some(&start) = self.vertices.get(i) {
+            if let Some(&end) = self.vertices.get(i + 1) {
+                decoder::decode_map_par(source, &self.edges[start..end], op);
+            }
+        }
     }
 
     pub fn degree(&self, source: u32) -> usize
@@ -97,11 +78,13 @@ impl CSR
             .unwrap_or(0usize)
     }
 
-    pub fn edges(&self) -> impl Iterator<Item = Edge> + '_
+    pub fn edge_map<OP>(&self, mut op: OP) 
+    where
+        OP: FnMut(Edge),
     {
-        (0u32..self.order() as u32).flat_map(|u| {
+        (0u32..self.order() as u32).for_each(|u| {
             let u = u as u32;
-            self.adj(u).map(move |v| Edge(u, v))
+            self.adj_map(u, |v| op(Edge(u, v)))
         })
     }
 
@@ -144,22 +127,24 @@ impl CSR
 
     fn reverse(&self) -> Self
     {
-        let iter = self.edges().map(|e| e.into()).flip().map(|t| Ok(t.into()));
+        let mut buf = Vec::with_capacity(self.size());
 
-        let graph: Result<Self, !> = Self::try_from_edges_with_capacity(self.size(), iter);
+        self.edge_map(|Edge(u, v)| {
+            buf.push(Edge(v, u));
+        });
 
-        graph.into_ok()
+        Self::from_buffer(&mut buf[..])
     }
 
     fn reorder(&self, perm: &[u32]) -> Self
     {
-        let iter = self
-            .edges()
-            .map(|e| Ok(Edge(perm[e.0 as usize], perm[e.1 as usize])));
+        let mut buf = Vec::with_capacity(self.size());
 
-        let graph: Result<Self, !> = Self::try_from_edges_with_capacity(self.size(), iter);
+        self.edge_map(|Edge(u, v)| {
+            buf.push(Edge(perm[u as usize], perm[v as usize]));
+        });
 
-        graph.into_ok()
+        Self::from_buffer(&mut buf[..])
     }
 
     /// The number of edges in the graph.

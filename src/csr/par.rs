@@ -18,6 +18,7 @@ use std::{
     ops::Add,
     slice,
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    simd::{Simd, SimdElement, LaneCount, SupportedLaneCount},
 };
 
 use crossbeam::{
@@ -28,11 +29,11 @@ use rayon::prelude::*;
 
 use crate::{encoder, iter::*, vec, Edge, CSR};
 
-fn prefix_sum<T>(vect: Vec<T>) -> Vec<T>
+pub fn exclusive_sum<T>(init: T, vect: Vec<T>) -> Vec<T>
 where
-    T: Add<Output = T> + Copy + Sized + Send + Default,
+    T: Add<Output = T> + Copy + Sized + Send
 {
-    rayon::iter::once(T::default())
+    rayon::iter::once(init)
         .chain(vect.into_par_iter())
         .fold(Vec::new, |mut acc, x| {
             match acc.last() {
@@ -157,7 +158,7 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
         nnzs.push(nnz);
     }
 
-    let mut indptr = prefix_sum(nnzs);
+    let mut indptr = exclusive_sum(0, nnzs);
 
     indptr.shrink_to_fit();
 
@@ -172,7 +173,6 @@ fn calc_prob(
     threshold: usize,
     in_degree: &[usize],
     out_degree: &[usize],
-    p: &[CachePadded<AtomicU64>],
     tx: &[Sender<f64>],
     rx: &[Receiver<f64>],
 )
@@ -181,29 +181,18 @@ fn calc_prob(
         let v_ix = v as usize;
         if in_degree[v_ix] < threshold {
             let prob = (k as f64 / (std::cmp::max(in_degree[v_ix], k) as f64)) * weight;
-            for u in incoming.adj(v) {
+            incoming.adj_map_par(v, |u| {
                 let u_ix = u as usize;
                 if out_degree[u_ix] < threshold {
-                    match tx[u_ix].try_send(prob) {
-                        Ok(()) => {}
-                        Err(TrySendError::Full(prob)) => {
-                            let prob = prob + rx[u_ix].try_iter().sum::<f64>();
-                            let x = &p[u_ix];
-                            let mut prev_prob = x.load(Ordering::Relaxed);
-                            loop {
-                                let new_prob = (f64::from_bits(prev_prob) + prob).to_bits();
-                                match x.compare_exchange_weak(
-                                    prev_prob,
-                                    new_prob,
-                                    Ordering::Relaxed,
-                                    Ordering::Relaxed,
-                                ) {
-                                    Ok(_) => break,
-                                    Err(prev) => prev_prob = prev,
-                                }
+                    let mut new_prob = prob;
+                    loop {
+                        match tx[u_ix].try_send(new_prob) {
+                            Ok(()) => break,
+                            Err(TrySendError::Full(_)) => {
+                                new_prob += rx[u_ix].try_iter().sum::<f64>();
                             }
+                            Err(_) => unreachable!(),
                         }
-                        Err(_) => unreachable!(),
                     }
                     calc_prob(
                         u,
@@ -213,12 +202,11 @@ fn calc_prob(
                         threshold,
                         in_degree,
                         out_degree,
-                        p,
                         tx,
                         rx,
                     );
                 }
-            }
+            });
         }
     }
 }
@@ -240,18 +228,6 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
         .map(|v| incoming.degree(v))
         .collect();
 
-    let p: Vec<CachePadded<AtomicU64>> = train_idx
-        .iter()
-        .map(|&b| {
-            if b {
-                CachePadded::new(AtomicU64::new(1f64.to_bits()))
-            }
-            else {
-                CachePadded::new(AtomicU64::new(0f64.to_bits()))
-            }
-        })
-        .collect();
-
     let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) =
         std::iter::repeat_with(|| bounded(graph.order().log2() as usize))
             .take(graph.order())
@@ -269,7 +245,6 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
                 threshold,
                 &in_degree[..],
                 &out_degree[..],
-                &p[..],
                 &tx[..],
                 &rx[..],
             );
@@ -278,14 +253,14 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
 
     std::mem::drop(tx);
 
-    p.into_par_iter()
-        .enumerate()
-        .map(|(v, shared_float)| {
+    (0..graph.order())
+        .into_par_iter()
+        .map(|v| {
             if out_degree[v] >= threshold {
                 f64::MAX
             }
             else {
-                let prob = f64::from_bits(shared_float.into_inner().into_inner());
+                let prob = (train_idx[v] as u64) as f64;
                 prob + rx[v].iter().sum::<f64>()
             }
         })

@@ -32,8 +32,10 @@ use std::{
     mem::MaybeUninit,
     ops::Range,
     slice::Iter,
-    simd::{Simd, u32x4},
 };
+
+use rayon::iter::IntoParallelIterator;
+ use rayon::iter::ParallelIterator;
 
 fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
 {
@@ -68,35 +70,115 @@ fn first_edge(source: u32, bytes: &mut Iter<'_, u8>) -> Option<u32>
     }
 }
 
-pub struct Group
-{
-    range: Range<usize>,
-    data: [MaybeUninit<u32>; 64],
-}
-
-impl Iterator for Group
-{
-    type Item = u32;
-
-    fn next(&mut self) -> Option<Self::Item>
-    {
-        let i = self.range.next()?;
-        Some(unsafe { self.data[i].assume_init() })
-    }
-}
-
-const SHIFT3: u32x4 = Simd::from_array([0, 16, 8, 0]);
-const SHIFT4: u32x4 = Simd::from_array([24, 16, 8, 0]);
-
-fn next_group<'a>(prev_edge: &mut u32, bytes: &mut Iter<'a, u8>) -> Option<Group>
+fn next_groups_map<'a, OP>(
+    prev_edge: u32,
+    mut bytes: Iter<'a, u8>, 
+    mut op: OP
+)
+where
+    OP: FnMut(u32),
 {
     match bytes.next() {
-        None => None,
+        None => {},
         Some(&header) => {
             let num_bytes = ((header & 0x3) + 1) as usize;
             let run_length = ((header >> 2) + 1) as usize;
             let (left, right) = bytes.as_slice().split_at(num_bytes * run_length);
-            *bytes = right.iter();
+
+            let mut p_edge = prev_edge;
+            match num_bytes {
+                1 => {
+                    for &byte in left.iter() {
+                        let diff = byte as u32;
+                        let sum = p_edge + diff;
+                        p_edge = sum;
+                        op(sum);
+                    }
+                }
+                2 => {
+                    for chunk in left.chunks_exact(2) {
+                        let mut diff = (chunk[0] as u32) << 8;
+                        diff |= chunk[1] as u32;
+                        let sum = p_edge + diff;
+                        p_edge = sum;
+                        op(sum);
+                    }
+                }
+                3 => {
+                    for chunk in left.chunks_exact(3) {
+                        let mut diff = (chunk[0] as u32) << 16;
+                        diff |= (chunk[1] as u32) << 8;
+                        diff |= chunk[2] as u32;
+                        let sum = p_edge + diff;
+                        p_edge = sum;
+                        op(sum);
+                    }
+                }
+                4 => {
+                    for chunk in left.chunks_exact(4) {
+                        let mut diff = (chunk[0] as u32) << 24;
+                        diff |= (chunk[1] as u32) << 16;
+                        diff |= (chunk[2] as u32) << 8;
+                        diff |= chunk[3] as u32;
+                        let sum = p_edge + diff;
+                        p_edge = sum;
+                        op(sum);
+                    }
+                }
+                _ => unreachable!(),
+            }
+
+            next_groups_map(p_edge, right.iter(), op);
+        }
+    }
+}
+
+pub fn decode_map<OP>(source: u32, bytes: &[u8], mut op: OP)
+where
+    OP: FnMut(u32),
+{
+    let mut bytes = bytes.iter();
+    let mut prev_edge = match first_edge(source, &mut bytes) {
+        Some(e) => {
+            op(e);
+            e
+        }
+        None => return,
+    };
+
+    next_groups_map(prev_edge, bytes, op);
+}
+
+fn group_map_par<'a, OP>(
+    buf: [MaybeUninit<u32>; 64],
+    run_length: usize,
+    op: OP)
+where
+    OP: Fn(u32) + Sync + Send,
+{
+    buf[0..run_length]
+        .into_par_iter()
+        .for_each(|u| {
+            let u = unsafe { u.assume_init() };
+            op(u);
+        });
+}
+
+fn next_groups_map_par<'a, OP>(
+    prev_edge: u32,
+    bytes: &[u8], 
+    op: OP
+)
+where
+    OP: Fn(u32) + Sync + Send + Copy,
+{
+    let mut bytes = bytes.iter();
+    match bytes.next() {
+        None => {},
+        Some(&header) => {
+            let num_bytes = ((header & 0x3) + 1) as usize;
+            let run_length = ((header >> 2) + 1) as usize;
+            let (left, right) = bytes.as_slice().split_at(num_bytes * run_length);
 
             let mut buf: [MaybeUninit<u32>; 64] = unsafe { MaybeUninit::uninit().assume_init() };
 
@@ -115,91 +197,62 @@ fn next_group<'a>(prev_edge: &mut u32, bytes: &mut Iter<'a, u8>) -> Option<Group
                 }
                 3 => {
                     for (chunk, dst) in left.chunks_exact(3).zip(buf.iter_mut()) {
-                        let mut x: u32x4 = Simd::from_array([0u32, chunk[0] as u32, chunk[1] as u32, chunk[2] as u32]);
-                        x <<= SHIFT3;
-                        dst.write(x.reduce_or());
+                        let mut diff = (chunk[0] as u32) << 16;
+                        diff |= (chunk[1] as u32) << 8;
+                        diff |= chunk[2] as u32;
+                        dst.write(diff);
                     }
                 }
                 4 => {
                     for (chunk, dst) in left.chunks_exact(4).zip(buf.iter_mut()) {
-                        let mut x = Simd::from_array([chunk[0] as u32, chunk[1] as u32, chunk[2] as u32, chunk[3] as u32]);
-                        x <<= SHIFT4;
-                        dst.write(x.reduce_or());
+                        let mut diff = (chunk[0] as u32) << 24;
+                        diff |= (chunk[1] as u32) << 16;
+                        diff |= (chunk[2] as u32) << 8;
+                        diff |= chunk[3] as u32;
+                        dst.write(diff);
                     }
                 }
                 _ => unreachable!(),
             }
 
-            let mut p_edge = *prev_edge;
+            let mut p_edge = prev_edge;
             for item in buf.iter_mut().take(run_length) {
-                let nnz = unsafe { item.assume_init() };
-                let sum = p_edge + nnz;
-                p_edge = sum;
-                item.write(sum);
+                let diff = unsafe { item.assume_init() };
+                let edge = p_edge + diff;
+                p_edge = edge;
+                item.write(edge);
             }
-            *prev_edge = p_edge;
 
-            Some(Group {
-                range: 0..run_length,
-                data: buf,
-            })
+            rayon::join(|| group_map_par(buf, run_length, op),
+                        || next_groups_map_par(p_edge, right, op));
         }
     }
 }
 
-pub enum Decoder<'a>
+pub fn decode_map_par<OP>(source: u32, bytes: &[u8], op: OP)
+where
+    OP: Fn(u32) + Sync + Send + Copy,
 {
-    FirstEdge(u32, Iter<'a, u8>),
-    NextEdge(Group, u32, Iter<'a, u8>),
-}
+    let mut bytes = bytes.iter();
+    let prev_edge = match first_edge(source, &mut bytes) {
+        Some(e) => e,
+        None => return,
+    };
 
-impl<'a> Iterator for Decoder<'a>
-{
-    type Item = u32;
-
-    fn next(&mut self) -> Option<Self::Item>
-    {
-        match self {
-            Self::FirstEdge(source, iter) => match first_edge(*source, iter) {
-                Some(e) => {
-                    let mut prev_edge = e;
-                    match next_group(&mut prev_edge, iter) {
-                        Some(group) => {
-                            *self = Self::NextEdge(group, prev_edge, iter.clone());
-                            Some(e)
-                        }
-                        None => Some(e),
-                    }
-                }
-                None => None,
-            },
-            Self::NextEdge(group, prev_edge, iter) => match group.next() {
-                Some(e) => Some(e),
-                None => match next_group(prev_edge, iter) {
-                    Some(mut group) => {
-                        let res = group.next();
-                        *self = Self::NextEdge(group, *prev_edge, iter.clone());
-                        res
-                    }
-                    None => None,
-                },
-            },
-        }
-    }
-}
-
-pub fn decode(source: u32, bytes: &[u8]) -> Decoder<'_>
-{
-    Decoder::FirstEdge(source, bytes.iter())
+    rayon::join(|| op(prev_edge),
+                || next_groups_map_par(prev_edge, bytes.as_slice(), op));
 }
 
 pub fn count(source: u32, bytes: &[u8]) -> usize
 {
     let mut bytes = bytes.iter();
 
-    first_edge(source, &mut bytes);
+    match first_edge(source, &mut bytes) {
+        None => return 0,
+        Some(_) => {},
+    }
 
-    let mut acc = 0;
+    let mut acc = 1;
 
     loop {
         match bytes.next() {

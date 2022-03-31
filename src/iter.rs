@@ -16,10 +16,10 @@
 
 use std::{cmp::Ordering, mem};
 
-use rand::{
-    distributions::{Distribution, Uniform},
-    Rng,
-};
+//use rand::{
+//    distributions::{Distribution, Uniform},
+//    Rng,
+//};
 
 pub struct Dedup<I: Iterator>
 {
@@ -157,7 +157,7 @@ where
     }
 }
 
-/// https://en.m.wikipedia.org/wiki/Reservoir_sampling#An_optimal_algorithm
+/*/// https://en.m.wikipedia.org/wiki/Reservoir_sampling#An_optimal_algorithm
 pub trait IteratorReservoirSamplingExt: Iterator + Sized
 {
     fn reservoir_sample<R: Rng + ?Sized>(self, rng: &mut R, k: usize) -> Vec<Self::Item>;
@@ -199,7 +199,7 @@ where
 
         buf
     }
-}
+}*/
 
 pub struct Flip<T, I: Iterator<Item = (T, T)> + Sized>(I);
 
