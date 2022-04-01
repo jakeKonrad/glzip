@@ -20,7 +20,6 @@ use std::{
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
-use crossbeam::utils::CachePadded;
 use rayon::prelude::*;
 
 use crate::{encoder, iter::*, vec, Edge, CSR};
@@ -162,7 +161,7 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
 }
 
 #[inline]
-fn atomic_add_f64(x: &CachePadded<AtomicU64>, y: f64)
+fn atomic_add_f64(x: &AtomicU64, y: f64)
 {
     let mut old = x.load(Ordering::Relaxed);
     loop {
@@ -182,7 +181,7 @@ fn calc_prob(
     threshold: usize,
     in_degree: &[usize],
     out_degree: &[usize],
-    p: &[CachePadded<AtomicU64>]
+    p: &[AtomicU64]
 )
 {
     if let Some(&k) = sizes.next() {
@@ -226,8 +225,8 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
         .map(|v| incoming.degree(v))
         .collect();
 
-    let p: Vec<CachePadded<AtomicU64>> =
-        std::iter::repeat_with(|| CachePadded::new(AtomicU64::new(0f64.to_bits())))
+    let p: Vec<AtomicU64> =
+        std::iter::repeat_with(|| AtomicU64::new(0f64.to_bits()))
             .take(graph.order())
             .collect();
 
@@ -256,7 +255,7 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
             }
             else {
                 let prob = (train_idx[v] as u64) as f64;
-                prob + f64::from_bits(shared_float.into_inner().into_inner())
+                prob + f64::from_bits(shared_float.into_inner())
             }
         })
         .collect()
