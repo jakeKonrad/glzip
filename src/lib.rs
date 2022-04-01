@@ -28,6 +28,7 @@ mod edge;
 mod encoder;
 pub mod error;
 mod iter;
+mod slice;
 mod vec;
 
 pub use csr::CSR;

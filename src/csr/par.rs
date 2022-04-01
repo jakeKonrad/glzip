@@ -53,7 +53,7 @@ fn find_index_edgelist(xs: &[Edge]) -> Option<usize>
 
     for (start, end) in (0..).scan(true, |cont, i| {
         if *cont {
-            let offset = 2usize.pow(i);
+            let offset = 2 * i;
             let start = n.saturating_sub(offset);
             let end = n + offset;
             Some(
