@@ -28,7 +28,7 @@
 // therefore achieve a speed up.
 //
 
-use std::{iter, iter::Peekable};
+use std::{iter, iter::Peekable, mem::MaybeUninit};
 
 fn first_edge(bytes: &mut Vec<u8>, source: u32, target: u32)
 {
@@ -64,6 +64,43 @@ const ONE_BYTE: u32 = 256; // 0xff + 1
 const TWO_BYTES: u32 = 65536; // 0xffff + 1
 const THREE_BYTES: u32 = 16777216; // 0xffffff + 1
 
+#[inline]
+fn parse_group_and_extend_vec<I, H, P, F, const N: usize>(
+    bytes: &mut Vec<u8>,
+    diffs: &mut Peekable<I>,
+    header: H,
+    pred: P,
+    f: F,
+) where
+    I: Iterator<Item = u32>,
+    H: Fn(u8) -> u8,
+    P: Fn(&u32) -> bool + Copy,
+    F: Fn(u32) -> [u8; N],
+{
+    let mut j = 0usize;
+    let mut buf: [MaybeUninit<u32>; 64] = unsafe { MaybeUninit::uninit().assume_init() };
+
+    for (i, dst) in buf.iter_mut().enumerate() {
+        match diffs.next_if(pred) {
+            Some(d) => {
+                dst.write(d);
+            }
+            None => {
+                j = i - 1;
+                break;
+            }
+        }
+    }
+
+    bytes.reserve((j + 1) * N);
+    bytes.push(header(j as u8));
+    for md in buf.iter().take(j + 1) {
+        let d = unsafe { md.assume_init() };
+        let bs = f(d);
+        bytes.extend(bs.into_iter());
+    }
+}
+
 fn next_group<I>(bytes: &mut Vec<u8>, diffs: &mut Peekable<I>)
 where
     I: Iterator<Item = u32>,
@@ -71,81 +108,34 @@ where
     match diffs.peek() {
         None => {}
         Some(&diff) if diff < ONE_BYTE => {
-            let mut j = 0usize;
-            let mut buf = [0u32; 64];
-            for i in 0..64 {
-                match diffs.next_if(|&d| d < ONE_BYTE) {
-                    Some(d) => {
-                        j = i;
-                        buf[i] = d;
-                    }
-                    None => break,
-                }
-            }
-            bytes.push((j as u8) << 2);
-            for i in 0..=j {
-                bytes.push(buf[i] as u8);
-            }
+            parse_group_and_extend_vec(bytes, diffs, |j| j << 2, |&d| d < ONE_BYTE, |d| [d as u8]);
         }
         Some(&diff) if diff < TWO_BYTES => {
-            let mut j = 0usize;
-            let mut buf = [0u32; 64];
-            for i in 0..64 {
-                match diffs.next_if(|d| (ONE_BYTE..TWO_BYTES).contains(d)) {
-                    Some(d) => {
-                        j = i;
-                        buf[i] = d;
-                    }
-                    None => break,
-                }
-            }
-            bytes.push(1u8 | ((j as u8) << 2));
-            for i in 0..=j {
-                let d = buf[i];
-                bytes.push((d >> 8) as u8);
-                bytes.push(d as u8);
-            }
+            parse_group_and_extend_vec(
+                bytes,
+                diffs,
+                |j| 1u8 | (j << 2),
+                |d| (ONE_BYTE..TWO_BYTES).contains(d),
+                |d| [(d >> 8) as u8, d as u8],
+            );
         }
         Some(&diff) if diff < THREE_BYTES => {
-            let mut j = 0usize;
-            let mut buf = [0u32; 64];
-            for i in 0..64 {
-                match diffs.next_if(|d| (TWO_BYTES..THREE_BYTES).contains(d)) {
-                    Some(d) => {
-                        j = i;
-                        buf[i] = d;
-                    }
-                    None => break,
-                }
-            }
-            bytes.push(2u8 | ((j as u8) << 2));
-            for i in 0..=j {
-                let d = buf[i];
-                bytes.push((d >> 16) as u8);
-                bytes.push((d >> 8) as u8);
-                bytes.push(d as u8);
-            }
+            parse_group_and_extend_vec(
+                bytes,
+                diffs,
+                |j| 2u8 | (j << 2),
+                |d| (TWO_BYTES..THREE_BYTES).contains(d),
+                |d| [(d >> 16) as u8, (d >> 8) as u8, d as u8],
+            );
         }
         Some(_) => {
-            let mut j = 0usize;
-            let mut buf = [0u32; 64];
-            for i in 0..64 {
-                match diffs.next_if(|&d| d >= THREE_BYTES) {
-                    Some(d) => {
-                        j = i;
-                        buf[i] = d;
-                    }
-                    None => break,
-                }
-            }
-            bytes.push(3u8 | ((j as u8) << 2));
-            for i in 0..=j {
-                let d = buf[i];
-                bytes.push((d >> 24) as u8);
-                bytes.push((d >> 16) as u8);
-                bytes.push((d >> 8) as u8);
-                bytes.push(d as u8);
-            }
+            parse_group_and_extend_vec(
+                bytes,
+                diffs,
+                |j| 3u8 | (j << 2),
+                |&d| d >= THREE_BYTES,
+                |d| [(d >> 24) as u8, (d >> 16) as u8, (d >> 8) as u8, d as u8],
+            );
         }
     }
 }
@@ -173,7 +163,6 @@ impl<I: Iterator<Item = u32>> Iterator for Diffs<I>
     {
         let x = self.iter.next()?;
         let &y = self.iter.peek()?;
-        assert!(y >= x);
         Some(y - x)
     }
 }
