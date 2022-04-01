@@ -18,11 +18,12 @@ use std::{
     ops::Add,
     slice,
     sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    collections::{HashSet, BinaryHeap},
 };
 
 use rayon::prelude::*;
 
-use crate::{encoder, iter::*, vec, Edge, CSR};
+use crate::{encoder, iter::*, vec, Edge, CSR, slice::*};
 
 pub fn exclusive_sum<T>(init: T, vect: Vec<T>) -> Vec<T>
 where
@@ -186,8 +187,9 @@ fn calc_prob(
 {
     if let Some(&k) = sizes.next() {
         let v_ix = v as usize;
-        if in_degree[v_ix] < threshold {
-            let prob = (k as f64 / (std::cmp::max(in_degree[v_ix], k) as f64)) * weight;
+        let v_in_degree = in_degree[v_ix];
+        if v_in_degree < threshold {
+            let prob = (k as f64 / (std::cmp::max(v_in_degree, k) as f64)) * weight;
             for u in incoming.adj(v) {
                 let u_ix = u as usize;
                 if out_degree[u_ix] < threshold {
@@ -261,4 +263,58 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
         .collect()
 }
 
+pub fn reordering(graph: &CSR, k: usize) -> Vec<u32>
+{
+    let vs: Vec<u32> = (0u32..(graph.order() as u32)).collect();
+    let mut new_vs = Vec::with_capacity(vs.len());
+
+    struct Prio
+    {
+        key: usize,
+        val: u32,
+    }
+
+    impl PartialEq for Prio {
+
+        fn eq(&self, other: &Self) -> bool
+        {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for Prio { }
+
+    impl Ord for Prio
+    {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering
+        {
+            self.key.cmp(&other.key)
+        }
+    }
+
+    impl PartialOrd for Prio
+    {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering>
+        {
+            Some(self.cmp(other))
+        }
+    }
+
+    for slice in vs.exponential_chunks(k) {
+        let set: HashSet<u32> = slice.iter().copied().collect();
+
+        let mut scores: BinaryHeap<Prio> = slice.into_par_iter()
+            .map(|&v| {
+                let score = graph.adj(v).filter(|u| set.contains(u)).count();
+                Prio { key: score, val: v }
+            })
+            .collect();
+
+        while let Some(prio) = scores.pop() {
+            new_vs.push(prio.val);
+        }
+    }
+
+    new_vs
+}
 

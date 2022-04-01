@@ -111,7 +111,13 @@ impl CSR
         // sort by descending probability
         vs.par_sort_unstable_by(|&a, &b| probs[b as usize].total_cmp(&probs[a as usize]));
 
-        (self.reorder(&vs[..]), vs)
+        let new_graph = self.reorder(&vs[..]);
+
+        let k = probs.iter().filter(|&&p| p == f64::MAX).count();
+
+        let ws = par::reordering(&new_graph, k);
+
+        (new_graph.reorder(&ws[..]), ws)
     }
 
     fn reverse(&self) -> Self
