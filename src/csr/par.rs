@@ -263,9 +263,9 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
         .collect()
 }
 
-pub fn reordering(graph: &CSR, k: usize) -> Vec<u32>
+pub fn reordering(graph: &CSR, k: usize, num_nodes: u32) -> Vec<u32>
 {
-    let vs: Vec<u32> = (0u32..(graph.order() as u32)).collect();
+    let vs: Vec<u32> = (0u32..num_nodes).collect();
     let mut new_vs = Vec::with_capacity(vs.len());
 
     struct Prio
