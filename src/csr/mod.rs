@@ -113,7 +113,11 @@ impl CSR
 
         let new_graph = self.reorder(&vs[..]);
 
-        let k = probs.iter().filter(|&&p| p == f64::MAX).count();
+        let mut k = probs.iter().filter(|&&p| p == f64::MAX).count();
+
+        if k == 0 {
+            k = self.order().log2() as usize;
+        }
 
         let ws = par::reordering(&new_graph, k);
 
