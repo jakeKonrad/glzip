@@ -17,7 +17,7 @@
 use std::{
     ops::Add,
     slice,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
 use crossbeam::channel::{bounded, Receiver, Sender, TrySendError};
@@ -161,6 +161,19 @@ pub fn edgelist_to_csr(edgelist: &mut [Edge]) -> (Vec<usize>, usize, Vec<u8>)
     (indptr, global_num_edges.into_inner(), edges)
 }
 
+#[inline]
+fn atomic_add_f64(x: &AtomicU64, y: f64)
+{
+    let mut old = x.load(Ordering::Relaxed);
+    loop {
+        let new = (y + f64::from_bits(old)).to_bits();
+        match x.compare_exchange_weak(old, new, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(prev) => old = prev,
+        }
+    }
+}
+
 fn calc_prob(
     v: u32,
     weight: f64,
@@ -169,8 +182,7 @@ fn calc_prob(
     threshold: usize,
     in_degree: &[usize],
     out_degree: &[usize],
-    tx: &[Sender<f64>],
-    rx: &[Receiver<f64>],
+    p: &[AtomicU64]
 )
 {
     if let Some(&k) = sizes.next() {
@@ -180,16 +192,7 @@ fn calc_prob(
             for u in incoming.adj(v) {
                 let u_ix = u as usize;
                 if out_degree[u_ix] < threshold {
-                    let mut new_prob = prob;
-                    loop {
-                        match tx[u_ix].try_send(new_prob) {
-                            Ok(()) => break,
-                            Err(TrySendError::Full(_)) => {
-                                new_prob += rx[u_ix].try_iter().sum::<f64>();
-                            }
-                            Err(_) => unreachable!(),
-                        }
-                    }
+                    atomic_add_f64(&p[u_ix], prob);
                     calc_prob(
                         u,
                         prob,
@@ -198,8 +201,7 @@ fn calc_prob(
                         threshold,
                         in_degree,
                         out_degree,
-                        tx,
-                        rx,
+                        p
                     );
                 }
             }
@@ -224,10 +226,10 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
         .map(|v| incoming.degree(v))
         .collect();
 
-    let (tx, rx): (Vec<Sender<f64>>, Vec<Receiver<f64>>) =
-        std::iter::repeat_with(|| bounded(graph.order().log2() as usize))
+    let p: Vec<AtomicU64> =
+        std::iter::repeat_with(|| AtomicU64::new(0f64.to_bits()))
             .take(graph.order())
-            .unzip();
+            .collect();
 
     let sizes = sizes.iter();
 
@@ -241,24 +243,23 @@ pub fn probability_calculation(graph: &CSR, train_idx: &[bool], sizes: &[usize])
                 threshold,
                 &in_degree[..],
                 &out_degree[..],
-                &tx[..],
-                &rx[..],
+                &p[..]
             );
         }
     });
 
-    std::mem::drop(tx);
-
-    (0..graph.order())
-        .into_par_iter()
-        .map(|v| {
+    p.into_par_iter()
+        .enumerate()
+        .map(|(v, shared_float)| {
             if out_degree[v] >= threshold {
                 f64::MAX
             }
             else {
                 let prob = (train_idx[v] as u64) as f64;
-                prob + rx[v].iter().sum::<f64>()
+                prob + f64::from_bits(shared_float.into_inner())
             }
         })
         .collect()
 }
+
+
