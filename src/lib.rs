@@ -14,21 +14,16 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#![feature(portable_simd)]
-#![feature(unwrap_infallible)]
-#![feature(total_cmp)]
-#![feature(never_type)]
-#![feature(int_log)]
 #![feature(slice_as_chunks)]
 #![feature(slice_split_at_unchecked)]
+#![feature(slice_group_by)]
 
 pub mod csr;
 mod decoder;
 mod edge;
 mod encoder;
-pub mod error;
 mod iter;
-mod slice;
+mod par;
 mod vec;
 
 pub use csr::CSR;
