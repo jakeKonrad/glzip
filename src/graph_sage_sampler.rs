@@ -1,5 +1,5 @@
 
-use std::{slice, collections::HashMap};
+use std::{slice, collections::{HashMap, hash_map::Entry}};
 
 use crate::{CSR, iter::*, vec};
 
@@ -10,6 +10,46 @@ pub struct Adj
     pub src: Vec<u32>,
     pub dst: Vec<u32>,
     pub size: (usize, usize),
+}
+    
+fn reindex(inputs: &[u32], outputs: &[u32], output_counts: &[usize]) -> (Vec<u32>, Vec<u32>, Vec<u32>)
+{
+    let mut out_map: HashMap<u32, u32> = HashMap::new();
+
+    let mut frontier = Vec::new();
+
+    let mut n_id = 0;
+
+    for &input in inputs.iter() {
+        out_map.insert(input, n_id);
+        n_id += 1;
+        frontier.push(input);
+    }
+
+    for &output in outputs.iter() {
+        match out_map.entry(output) {
+            Entry::Vacant(hole) => {
+                hole.insert(n_id); 
+                n_id += 1;
+                frontier.push(output);
+            }
+            _ => {},
+        }
+    }
+
+    let mut row_idx = Vec::with_capacity(outputs.len());
+    let mut col_idx = Vec::with_capacity(outputs.len());
+
+    let mut cnt = 0;
+    for &input in inputs.iter() {
+        let i = out_map[&input];
+        for _ in 0..output_counts[input as usize] {
+            row_idx.push(i);
+            col_idx.push(out_map[&outputs[cnt]]);
+            cnt += 1;
+        }
+    }
+    (frontier, row_idx, col_idx)
 }
 
 pub struct GraphSageSampler<'a>
@@ -37,43 +77,6 @@ impl<'a> GraphSageSampler<'a>
             .reduce(|| (vec![], vec![]), |a, b| (vec::concat(a.0, b.0), vec::concat(a.1, b.1)))
     }
 
-    fn reindex(&self, inputs: &[u32], outputs: &[u32], output_counts: &[usize]) -> (Vec<u32>, Vec<u32>, Vec<u32>)
-    {
-        let mut out_map: HashMap<u32, u32> = HashMap::new();
-
-        let mut frontier = Vec::new();
-
-        let mut n_id = 0;
-
-        for &input in inputs.iter() {
-            out_map.insert(input, n_id);
-            n_id += 1;
-            frontier.push(input);
-        }
-
-        for &output in outputs.iter() {
-            if !out_map.contains_key(&output) {
-                out_map.insert(output, n_id); 
-                n_id += 1;
-                frontier.push(output);
-            }
-        }
-
-        let mut row_idx = Vec::with_capacity(outputs.len());
-        let mut col_idx = Vec::with_capacity(outputs.len());
-
-        let mut cnt = 0;
-        for &input in inputs.iter() {
-            for _ in 0..output_counts[input as usize] {
-                assert!(cnt < outputs.len());
-                row_idx.push(out_map[&input]);
-                col_idx.push(out_map[&outputs[cnt]]);
-                cnt += 1;
-            }
-        }
-        (frontier, row_idx, col_idx)
-    }   
-
     pub fn sample(&self, input_nodes: &[u32]) -> (Vec<u32>, usize, Vec<Adj>)
     {
         let mut nodes: Vec<_> = input_nodes.iter().copied().collect();
@@ -82,7 +85,7 @@ impl<'a> GraphSageSampler<'a>
 
         for &k in self.sizes.clone() {
             let (out, cnt) = self.sample_kernel(&nodes[..], k);
-            let (frontier, src, dst) = self.reindex(&nodes[..], &out[..], &cnt[..]);
+            let (frontier, src, dst) = reindex(&nodes[..], &out[..], &cnt[..]);
             let size = (frontier.len(), nodes.len());
             adjs.push(Adj { src, dst, size });
             nodes = frontier;
