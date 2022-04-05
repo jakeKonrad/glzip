@@ -65,6 +65,7 @@ impl<'a> GraphSageSampler<'a>
         let mut cnt = 0;
         for &input in inputs.iter() {
             for _ in 0..output_counts[input as usize] {
+                assert!(cnt < outputs.len());
                 row_idx.push(out_map[&input]);
                 col_idx.push(out_map[&outputs[cnt]]);
                 cnt += 1;
