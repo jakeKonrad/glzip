@@ -22,6 +22,7 @@ pub mod csr;
 mod decoder;
 mod edge;
 mod encoder;
+pub mod graph_sage_sampler;
 mod iter;
 mod par;
 mod vec;

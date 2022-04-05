@@ -32,7 +32,7 @@ pub struct CSR
 
 impl CSR
 {
-    /// The edges adjacent to a vertex.
+    /// The neighbors of a vertex.
     ///
     /// # Examples
     ///
@@ -46,11 +46,11 @@ impl CSR
     ///     [2,1],
     /// ]);
     ///
-    /// assert_eq!(vec![1,2], csr.adj(0).collect::<Vec<_>>());
-    /// assert_eq!(vec![0], csr.adj(1).collect::<Vec<_>>());
-    /// assert_eq!(vec![1], csr.adj(2).collect::<Vec<_>>());
+    /// assert_eq!(vec![1,2], csr.neighbors(0).collect::<Vec<_>>());
+    /// assert_eq!(vec![0], csr.neighbors(1).collect::<Vec<_>>());
+    /// assert_eq!(vec![1], csr.neighbors(2).collect::<Vec<_>>());
     /// ```
-    pub fn adj(&self, source: u32) -> impl Iterator<Item = u32> + '_
+    pub fn neighbors(&self, source: u32) -> impl Iterator<Item = u32> + '_
     {
         let i = source as usize;
         self.vertices.get(i).into_iter().flat_map(move |&start| {
@@ -114,7 +114,7 @@ impl CSR
     {
         (0u32..self.order() as u32).flat_map(|u| {
             let u = u as u32;
-            self.adj(u).map(move |v| Edge(u, v))
+            self.neighbors(u).map(move |v| Edge(u, v))
         })
     }
 
