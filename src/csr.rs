@@ -148,6 +148,7 @@ impl CSR
                     let mut iter = group.iter().dedup();
                     if let Some(&Edge(u, v)) = iter.next() {
                         num_edges += 1usize;
+                        let start = edges.len();
                         encoder::encode(
                             &mut edges,
                             u,
@@ -156,7 +157,8 @@ impl CSR
                                 *w
                             })),
                         );
-                        nodes_and_nnzs.push((u, edges.len()));
+                        let end = edges.len();
+                        nodes_and_nnzs.push((u, end - start));
                         (num_edges, nodes_and_nnzs, edges)
                     }
                     else {
