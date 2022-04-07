@@ -85,7 +85,7 @@ impl<'a> GraphSageSampler<'a>
 
         for &k in self.sizes.clone() {
             let (out, cnt) = self.sample_kernel(&nodes[..], k);
-            let (frontier, src, dst) = reindex(&nodes[..], &out[..], &cnt[..]);
+            let (frontier, dst, src) = reindex(&nodes[..], &out[..], &cnt[..]);
             let size = (frontier.len(), nodes.len());
             adjs.push(Adj { src, dst, size });
             nodes = frontier;
