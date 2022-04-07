@@ -41,10 +41,10 @@ fn reindex(inputs: &[u32], outputs: &[u32], output_counts: &[usize]) -> (Vec<u32
     let mut col_idx = Vec::with_capacity(outputs.len());
 
     let mut cnt = 0;
-    for &input in inputs.iter() {
-        let i = out_map[&input];
-        for _ in 0..output_counts[input as usize] {
-            row_idx.push(i);
+    for (i, &input) in inputs.iter().enumerate() {
+        let idx = out_map[&input];
+        for _ in 0..output_counts[i] {
+            row_idx.push(idx);
             col_idx.push(out_map[&outputs[cnt]]);
             cnt += 1;
         }
