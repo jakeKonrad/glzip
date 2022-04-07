@@ -17,12 +17,16 @@
 #![feature(slice_as_chunks)]
 #![feature(slice_split_at_unchecked)]
 #![feature(slice_group_by)]
+#![feature(never_type)]
+#![feature(unwrap_infallible)]
+#![feature(total_cmp)]
 
 pub mod csr;
 mod decoder;
 mod edge;
 mod encoder;
 pub mod graph_sage_sampler;
+pub mod reorder;
 mod iter;
 mod par;
 mod vec;

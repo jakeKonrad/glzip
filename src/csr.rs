@@ -191,6 +191,23 @@ impl CSR
             edges,
         }
     }
+    pub fn from_edges<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = Edge>
+    {
+        let graph: Result<Self, !> = Self::try_from_edges(iter.into_iter().map(|e| Ok(e)));
+
+        graph.into_ok()
+    }
+
+    pub fn from_edges_with_capacity<I>(capacity: usize, iter: I) -> Self
+    where
+        I: IntoIterator<Item = Edge>
+    {
+        let graph: Result<Self, !> = Self::try_from_edges_with_capacity(capacity, iter.into_iter().map(|e| Ok(e)));
+
+        graph.into_ok()
+    }
 
     pub fn nbytes(&self) -> usize
     {
